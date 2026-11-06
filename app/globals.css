@@ -1,0 +1,239 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. The first block is the design contract, verbatim.
+ * Everything after it extends the contract (dark mode, solid surfaces, elevation, layout)
+ * and is the only other source of values the UI may use.
+ */
+:root {
+  /* Typography — San Francisco system stack */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+  --text-large-title: 34px / 1.2;
+  --text-title: 28px / 1.2;
+  --text-headline: 17px / 1.3;
+  --text-body: 17px / 1.5;
+  --text-callout: 16px / 1.4;
+  --text-caption: 12px / 1.3;
+
+  /* Spacing — 8-point grid */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radii — concentric */
+  --radius-panel: 16px;
+  --radius-control: 12px;
+  --radius-button: 8px;
+
+  /* Surfaces */
+  --bg-base: #F5F5F7;
+  --bg-elevated: rgba(255, 255, 255, 0.72);
+  --bg-elevated-dark: rgba(28, 28, 30, 0.78);
+  --text-primary: #1D1D1F;
+  --text-secondary: #86868B;
+  --accent: #0071E3;
+}
+
+/* ── Contract extensions ─────────────────────────────────────────────── */
+:root {
+  color-scheme: light dark;
+
+  /* Solid content surfaces (cards, the canvas page, the generated flyer) */
+  --bg-surface: #FFFFFF;
+  --fill: rgba(120, 120, 128, 0.12);
+  --fill-strong: rgba(120, 120, 128, 0.2);
+  --separator: rgba(0, 0, 0, 0.08);
+  --material-stroke: rgba(0, 0, 0, 0.06);
+
+  --accent-text: #0066CC;
+  --accent-contrast: #FFFFFF;
+  --accent-soft: rgba(0, 113, 227, 0.12);
+  --danger: #D70015;
+  --success: #248A3D;
+
+  /* Skeleton + scrim */
+  --skeleton: rgba(120, 120, 128, 0.12);
+  --skeleton-highlight: rgba(255, 255, 255, 0.6);
+  --scrim: rgba(0, 0, 0, 0.24);
+
+  /* Elevation */
+  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  --elevation-hover: 0 12px 32px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  --elevation-float: 0 16px 48px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --elevation-page: 0 2px 8px rgba(0, 0, 0, 0.06), 0 24px 64px rgba(0, 0, 0, 0.1);
+  --focus-ring: 0 0 0 4px rgba(0, 113, 227, 0.32);
+
+  /* Materials (control layer only) */
+  --material-blur: saturate(180%) blur(20px);
+
+  /* Layout */
+  --rail-width: 56px;
+  --bar-height: 52px;
+  --content-max: 1120px;
+  --prose-max: 640px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-base: #000000;
+    --bg-elevated: var(--bg-elevated-dark);
+    --text-primary: #F5F5F7;
+
+    --bg-surface: #1C1C1E;
+    --fill: rgba(118, 118, 128, 0.24);
+    --fill-strong: rgba(118, 118, 128, 0.36);
+    --separator: rgba(255, 255, 255, 0.1);
+    --material-stroke: rgba(255, 255, 255, 0.08);
+
+    --accent-text: #2997FF;
+    --accent-soft: rgba(41, 151, 255, 0.18);
+    --danger: #FF453A;
+    --success: #30D158;
+
+    --skeleton: rgba(118, 118, 128, 0.2);
+    --skeleton-highlight: rgba(255, 255, 255, 0.08);
+    --scrim: rgba(0, 0, 0, 0.56);
+
+    --elevation-card: 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --elevation-hover: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+    --elevation-float: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --elevation-page: 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 24px 64px rgba(0, 0, 0, 0.6);
+    --focus-ring: 0 0 0 4px rgba(41, 151, 255, 0.4);
+  }
+}
+
+/* ── Tailwind bridge: utilities resolve to the tokens above ──────────── */
+@theme inline {
+  --spacing: var(--space-1);
+
+  --text-*: initial;
+
+  --radius-panel: var(--radius-panel);
+  --radius-control: var(--radius-control);
+  --radius-button: var(--radius-button);
+
+  --color-base: var(--bg-base);
+  --color-surface: var(--bg-surface);
+  --color-elevated: var(--bg-elevated);
+  --color-fg: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-soft: var(--accent-soft);
+  --color-fill: var(--fill);
+  --color-fill-strong: var(--fill-strong);
+  --color-separator: var(--separator);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-skeleton: var(--skeleton);
+  --color-scrim: var(--scrim);
+
+  --shadow-card: var(--elevation-card);
+  --shadow-hover: var(--elevation-hover);
+  --shadow-float: var(--elevation-float);
+  --shadow-page: var(--elevation-page);
+  --shadow-focus: var(--focus-ring);
+  --shadow-invalid: 0 0 0 1px var(--danger);
+}
+
+/*
+ * Type scale. Each utility applies one contract token via the `font` shorthand. Weight
+ * reads Tailwind's --tw-font-weight so `font-semibold` etc. still compose in any order.
+ */
+@utility text-large-title {
+  font: var(--text-large-title) var(--font-sans);
+  font-weight: var(--tw-font-weight, 700);
+  letter-spacing: -0.02em;
+}
+@utility text-title {
+  font: var(--text-title) var(--font-sans);
+  font-weight: var(--tw-font-weight, 700);
+  letter-spacing: -0.015em;
+}
+@utility text-headline {
+  font: var(--text-headline) var(--font-sans);
+  font-weight: var(--tw-font-weight, 600);
+}
+@utility text-body {
+  font: var(--text-body) var(--font-sans);
+  font-weight: var(--tw-font-weight, 400);
+}
+@utility text-callout {
+  font: var(--text-callout) var(--font-sans);
+  font-weight: var(--tw-font-weight, 400);
+}
+@utility text-caption {
+  font: var(--text-caption) var(--font-sans);
+  font-weight: var(--tw-font-weight, 400);
+}
+
+/* Translucent material — toolbars, floating panels, sheets, modals. Never content. */
+@utility material {
+  background-color: var(--bg-elevated);
+  backdrop-filter: var(--material-blur);
+  -webkit-backdrop-filter: var(--material-blur);
+  box-shadow: inset 0 0 0 0.5px var(--material-stroke);
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--bg-surface);
+  }
+}
+
+@utility focus-ring {
+  outline: none;
+  &:focus-visible {
+    box-shadow: var(--focus-ring);
+  }
+}
+
+@layer base {
+  html {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font: var(--text-body) var(--font-sans);
+    min-height: 100dvh;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+  }
+
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+}
+
+/* Reduced motion: anything not driven by Framer Motion becomes an instant state change too. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}
