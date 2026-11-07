@@ -18,6 +18,13 @@ Project rules live in `CLAUDE.md` and `.claude/rules/`. Layout is described in `
    - or `ANTHROPIC_API_KEY` for Claude, which takes precedence.
 
    `UNSPLASH_ACCESS_KEY` (stock photos) is optional too: without it photo frames stay empty for you to fill.
+
+   `IDEOGRAM_API_KEY` (optional, paid) makes the lead direction an Ideogram 4.5 design whose text is lifted
+   into editable layers by Layerize. Create a key at ideogram.ai (API → accept the agreement, add a payment
+   method, buy credits — requests return 402 until there are credits). `pnpm ideogram:quote` prices one
+   design without charging; `IDEOGRAM_QUALITY` (low | medium | high) trades cost for detail.
+
+   `NEXT_PUBLIC_SUPPORT_EMAIL` (optional) adds a contact address to the Privacy and Terms pages.
 4. Stripe (test mode): put `STRIPE_SECRET_KEY` (sk_test_…) and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (pk_test_…)
    in `.env.local`, then run `pnpm stripe:setup`. It creates the Pro and Max products, their monthly and annual
    prices and a Customer Portal configuration, and writes the IDs into `.env.local`. Re-running it is safe.
@@ -45,7 +52,7 @@ Project rules live in `CLAUDE.md` and `.claude/rules/`. Layout is described in `
 | Topic | Choice |
 | --- | --- |
 | Credits | Only `deduct_credits` / `add_credits` (service role) move credits. Generate: 5 credits for 3 variations, refunded on failure. Export: 1–4 credits by format. Costs live in `lib/stripe/plans.ts`. |
-| History | 20 undo steps (`.claude/rules/canvas-editor.md` overrides the brief's 50). |
+| History | 100 undo steps (`.claude/rules/canvas-editor.md`). |
 | Auto-save | 30s debounce, plus a keepalive flush on tab hide and a local draft so a hard refresh restores exact state. |
 | Annual billing | 10× monthly; annual invoices grant 12 months of credits up front. |
 | Exports | Rendered client-side by Konva at full resolution, charged server-side before upload to a signed slot. Free plan exports are watermarked. |

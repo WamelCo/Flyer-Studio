@@ -274,7 +274,10 @@ export function coerceBrief(raw: unknown): unknown {
   const copy = asRecord(r.copy);
   const contact = asRecord(copy.contact);
   const category = slug(r.category).replace(/-/g, "_");
+  const safety = asRecord(r.safety);
   return {
+    // Only an explicit verdict counts as a violation (the schema makes the model always give one).
+    safety: { violation: safety.violation === true || safety.violation === 1 || safety.violation === "true", category: asText(safety.category) },
     category: (CATEGORIES as readonly string[]).includes(category) ? category : "other",
     audience: asText(r.audience) ?? "general public",
     tone: asTextList(r.tone).slice(0, 4),
@@ -313,6 +316,9 @@ export function coerceBrief(raw: unknown): unknown {
     decor: (DECOR_LEVELS as readonly string[]).includes(slug(r.decor)) ? slug(r.decor) : "balanced",
     motifs: pickIds(r.motifs, MOTIF_IDS).slice(0, 3),
     brandColor: isHex(asText(r.brandColor)) ? asText(r.brandColor) : null,
+    colors: asTextList(r.colors).filter((c) => isHex(c)).slice(0, 3),
+    requirements: asTextList(r.requirements).slice(0, 8),
+    artwork: asText(r.artwork) ?? "",
     photoQueries: asTextList(r.photoQueries).slice(0, 3),
   };
 }

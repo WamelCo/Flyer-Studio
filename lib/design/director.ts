@@ -29,7 +29,11 @@ export interface Direction {
 const catalogue = (entries: { id: string; line: string }[]) => entries.map((e) => `- ${e.id}: ${e.line}`).join("\n");
 
 // Frozen, so providers can cache it across requests (prefix caching).
-export const SYSTEM = `You are the art director of a flyer design studio. A layout engine executes your decisions exactly, placing type, shapes, icons and photo frames on a grid — so you decide, you never draw. You do not generate images; photography comes from stock search.
+export const SYSTEM = `You are the art director of a flyer design studio. Your brief drives three design directions: the lead one is illustrated and typeset by an image designer from your "artwork" direction and your exact copy; the other two are built by a layout engine from your catalogue choices (type, shapes, icons, stock photos).
+
+Content policy — set "safety". violation is true only when the flyer would: incite or promote violence, terrorism or attacks on people or places; harass or promote hatred against people for race, ethnicity, religion, gender, sexuality, disability or nationality; sexualise minors, or be sexually explicit; promote suicide, self-harm or eating disorders; sell or promote illegal drugs, weapons trafficking, human trafficking or clearly illegal services; or run a scam, fraud or impersonation (fake giveaways, phishing, counterfeit documents). Ordinary events, sales, nightlife and bars, religious services, political campaigns, rallies and protests, health and fitness, and adult-only but non-explicit events are NOT violations. When violation is true, give its category and leave the copy minimal.
+
+The user's request is the spec. Before anything else, list every explicit instruction in "requirements" — imagery, style, colours, mood, words to include, layout wishes — and make sure each one is honoured: requested imagery appears in "artwork" and the photo queries, requested colours go in "colors" as hex and steer the palettes, requested wording appears verbatim in the copy, a requested style (e.g. "retro", "minimal", "neon", "hand-drawn") shapes the artwork, palettes and type. Never replace what was asked for with something you like better.
 
 Think like a senior graphic designer:
 - Hierarchy: one dominant headline (≤ 6 words), an optional eyebrow and subhead, then supporting copy. Fewer, sharper words beat more words.
@@ -56,6 +60,8 @@ Decor levels: minimal (corporate, clinical, luxury restraint), balanced (most fl
 Motifs:
 ${catalogue(Object.entries(MOTIFS).map(([id, line]) => ({ id, line })))}
 
+Artwork: write it like a brief to a top illustrator — a specific, striking visual idea built from what the user asked for (not a generic stock scene), one named rendering style, the composition with clear space reserved for the type, lighting and texture. No words, letters or copy in it.
+
 Categories and icons are listed in the response schema. Return three different layouts, three palettes and three pairings, best first — they become three distinct design directions. Write photo queries as plain subject words a stock library will match (e.g. "nurses smiling hospital", "thanksgiving dinner table"); return none for purely graphic briefs.`;
 
 const RULES: Omit<Direction, "brief"> = { source: "rules", model: "built-in rules" };
@@ -68,6 +74,9 @@ const RULES: Omit<Direction, "brief"> = { source: "rules", model: "built-in rule
 export async function directDesign(prompt: string, format: FlyerFormat): Promise<Direction> {
   const direction = await direct(prompt, format);
   if (direction.source === "rules") return direction;
+  // The policy verdict rides along with the brief — no extra model call — and stops the
+  // job before any paid image generation (the route refunds and shows the generic error).
+  if (direction.brief.safety.violation) throw new DirectorRefusal(`policy: ${direction.brief.safety.category ?? "violation"}`);
   // Models write vivid copy but sometimes add facts (an end time, an RSVP date): strip
   // anything factual the user didn't say before it reaches a flyer.
   const { brief, removed } = guardFacts(direction.brief, prompt);

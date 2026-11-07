@@ -2,6 +2,25 @@
 import type { FlyerDoc, FlyerFormat } from "@/lib/canvas/types";
 import type { ExportFormatId } from "@/lib/stripe/plans";
 
+/** POST /api/generate when the job runs in the background (202). */
+export interface GenerateAccepted {
+  jobId: string;
+  status: "pending";
+  /** Balance after the charge. */
+  balance: number;
+}
+
+/** GET /api/generate/[jobId]. */
+export interface GenerationStatus {
+  status: "pending" | "running" | "succeeded" | "failed";
+  /** queued | directing | designing | composing | saving | done (see lib/generation/pipeline.ts). */
+  stage: string | null;
+  result?: GenerateResponse;
+  error?: { code: import("@/lib/api/types").ApiErrorCode; message: string };
+  /** Balance after a failed job's refund. */
+  balance?: number;
+}
+
 export interface GenerateResponse {
   jobId: string;
   projectId: string;

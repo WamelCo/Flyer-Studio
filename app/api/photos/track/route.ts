@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { handle, parseJson, requireUser } from "@/lib/api/server";
+import { enforce, LIMITS } from "@/lib/rate-limit";
 import { trackDownloads } from "@/lib/design/photos";
 
 const Body = z.object({
@@ -11,7 +12,8 @@ const Body = z.object({
 
 /** Unsplash requires a download ping whenever a user places one of its photos. */
 export const POST = handle(async (request: Request) => {
-  await requireUser();
+  const user = await requireUser();
+  await enforce(LIMITS.photos(user.id), "Too many requests — wait a moment and try again.");
   const { downloadLocation } = await parseJson(request, Body);
   trackDownloads([{ downloadLocation }]);
   return NextResponse.json({ tracked: true });

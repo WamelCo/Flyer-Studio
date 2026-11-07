@@ -302,6 +302,14 @@ await test("primary down → the fallback provider (LLM_FALLBACK_*) directs", as
   assert.equal(result.model, "mock-glm via Custom");
   delete process.env.LLM_FALLBACK_PROVIDER;
 });
+await test("a policy violation in the brief stops the design as a refusal; a clean verdict passes", async () => {
+  reset(() => ({ content: JSON.stringify({ ...good, safety: { violation: true, category: "violence" } }) }));
+  await assert.rejects(directDesign("something violent", "poster"), (error: Error) => error.constructor.name === "DirectorRefusal" && /violence/.test(error.message));
+  reset(() => ({ content: JSON.stringify({ ...good, safety: { violation: false, category: null } }) }));
+  assert.equal((await directDesign("Summer jazz night", "poster")).source, "open-model");
+  reset(() => ({ content: JSON.stringify(good) })); // no verdict at all: treated as clean
+  assert.equal((await directDesign("Summer jazz night", "poster")).brief.safety.violation, false);
+});
 await test("a refusal surfaces as DirectorRefusal (the route shows the generic message)", async () => {
   reset(() => ({ content: "", finish: "content_filter" }));
   await assert.rejects(directDesign("something", "poster"), (error: Error) => error.constructor.name === "DirectorRefusal");

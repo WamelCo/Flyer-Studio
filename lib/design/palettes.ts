@@ -182,14 +182,20 @@ export const PALETTES: Record<PaletteId, Palette> = Object.fromEntries(
   PALETTE_IDS.map((id) => [id, { id, ...DEFS[id] }]),
 ) as Record<PaletteId, Palette>;
 
-/** Re-key a palette around a client's brand colour while keeping its harmony and contrast. */
-export function withBrandColor(palette: Palette, brandColor: string | null | undefined): Palette {
-  if (!isHex(brandColor)) return palette;
-  const primary = normalizeHex(brandColor);
-  return {
-    ...palette,
-    primary,
-    onPrimary: readableOn(primary, ["#FFFFFF", palette.ink, "#111111"]),
-    tint: mix(primary, palette.bg, 0.84),
-  };
+/**
+ * Re-key a palette around the colours the user asked for (brand colour → primary, a
+ * second colour → accent) while keeping its harmony and contrast: text colours paired
+ * with them are recomputed, never assumed.
+ */
+export function withBrandColor(palette: Palette, brandColor: string | null | undefined, accentColor?: string | null): Palette {
+  let next = palette;
+  if (isHex(brandColor)) {
+    const primary = normalizeHex(brandColor);
+    next = { ...next, primary, onPrimary: readableOn(primary, ["#FFFFFF", palette.ink, "#111111"]), tint: mix(primary, palette.bg, 0.84) };
+  }
+  if (isHex(accentColor)) {
+    const accent = normalizeHex(accentColor);
+    next = { ...next, accent, onAccent: readableOn(accent, ["#FFFFFF", palette.ink, "#111111"]) };
+  }
+  return next;
 }

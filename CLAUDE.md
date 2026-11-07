@@ -14,10 +14,15 @@ A production SaaS that generates flyers from a text prompt, lets users edit them
 - Tailwind CSS + shadcn/ui
 - Supabase (Auth, Postgres, Storage)
 - Stripe (Subscriptions + Embedded Checkout + Webhooks)
-- A text LLM as art director + a layout engine (`lib/design/`) — no image generation. Claude (`@anthropic-ai/sdk`) when `ANTHROPIC_API_KEY` is set; otherwise an open-weight model (Qwen / GLM / DeepSeek) over an OpenAI-compatible API (`lib/design/open-model.ts`)
+- A text LLM as art director: Claude (`@anthropic-ai/sdk`) when `ANTHROPIC_API_KEY` is set; otherwise an open-weight model (Qwen / GLM / DeepSeek) over an OpenAI-compatible API (`lib/design/open-model.ts`)
+- Ideogram 4.5 (lead design) + Layerize (text → editable layers) — `lib/design/ideogram.ts`; a layout engine (`lib/design/`) for the other directions. Output is always editable layers, never a flat image.
 - Unsplash (stock photography for photo frames)
 - Konva (`react-konva`) for the canvas editor
 - Framer Motion for ALL UI animation
+
+**Roadmap:** `docs/ROADMAP.md` (phases 0–6; Phase 0 built). Deploying: `docs/DEPLOYMENT.md`. Approved additions, adopted with their phase — not
+substitutes for the stack above: Inngest (background jobs), Upstash (rate limits), Sentry,
+PostHog, Resend (email), resvg (server rendering), WorkOS (SSO/SCIM), Gelato (print orders).
 
 ---
 
@@ -35,4 +40,10 @@ pnpm stripe:webhooks [--replay]  # Forward test events to the dev server without
 pnpm test:stripe                 # Billing end to end in test mode (needs pnpm dev running)
 pnpm test:director               # Art director against a mock OpenAI-compatible provider
 pnpm director:try "<prompt>"     # Try the configured art director on a real prompt
+pnpm test:ideogram               # Ideogram lead direction against a mock API (no credits)
+pnpm ideogram:quote              # Exact Ideogram price per lead design (dry run, no charge)
 pnpm audit:contrast              # WCAG contrast across every layout × palette × pairing × format
+pnpm test:db                     # Credit ledger, jobs, rate limits — real migrations in PGlite
+pnpm test:jobs                   # Background generation client (polling, failures, timeouts)
+pnpm test:e2e                    # Playwright smoke tests against a production build (pnpm build first)
+pnpm test:generation [--http] [--sweeper]  # Real pipeline end to end (throwaway user); --http needs pnpm dev

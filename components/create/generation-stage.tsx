@@ -21,10 +21,10 @@ function frameStyle(format: FlyerFormat, maxHeight: string) {
   return { aspectRatio: `${width} / ${height}`, width: `min(100%, calc(${maxHeight} * ${width / height}))` };
 }
 
-export function GeneratingFrame({ format }: { format: FlyerFormat }) {
+export function GeneratingFrame({ format, stage }: { format: FlyerFormat; stage?: string }) {
   return (
     <div className="flex w-full flex-col items-center gap-4">
-      <StagedStatus />
+      <StagedStatus stage={stage} />
       <div style={frameStyle(format, "62dvh")}>
         <Skeleton className="size-full rounded-control" />
       </div>

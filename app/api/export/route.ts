@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { ExportStartResponse } from "@/lib/api/contracts";
 import { ApiException, handle, parseJson, requireUser } from "@/lib/api/server";
+import { enforce, LIMITS } from "@/lib/rate-limit";
 import { deductCredits, getProfile } from "@/lib/db/credits";
 import { EXPORT_FORMATS } from "@/lib/export/formats";
 import { isFormatAllowed, PLANS } from "@/lib/stripe/plans";
@@ -23,6 +24,7 @@ const Body = z.object({
  */
 export const POST = handle(async (request: Request) => {
   const user = await requireUser();
+  await enforce(LIMITS.export(user.id), "Exporting very quickly — wait a moment and try again.");
   const { exportId, projectId, format, watermarked } = await parseJson(request, Body);
   const profile = await getProfile(user.id);
   const plan = PLANS[profile.plan];
