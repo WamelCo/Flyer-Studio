@@ -22,11 +22,14 @@ const HOLD_MS = 3200;
 
 export function HeroDemo({ scenes }: { scenes: DemoScene[] }) {
   const reduceMotion = usePrefersReducedMotion();
+  // Opens on a finished design (rendered visible from the server), then cycles prompts.
   const [scene, setScene] = useState(0);
-  const [typed, setTyped] = useState(0);
-  const [phase, setPhase] = useState<Phase>("typing");
-  const [stage, setStage] = useState(0);
+  const [typed, setTyped] = useState(() => scenes[0]!.prompt.length);
+  const [phase, setPhase] = useState<Phase>("result");
+  const [stage, setStage] = useState(STAGES.length - 1);
   const [selected, setSelected] = useState(0);
+  // The design on screen before this prompt, kept dimmed while the next one is typed.
+  const [previous, setPrevious] = useState<{ scene: number; selected: number } | null>(null);
 
   const current = scenes[scene]!;
   const docs = current.docs;
@@ -45,6 +48,7 @@ export function HeroDemo({ scenes }: { scenes: DemoScene[] }) {
         : window.setTimeout(() => setPhase("result"), STAGE_MS);
     } else {
       timer = window.setTimeout(() => {
+        setPrevious({ scene, selected });
         setScene((value) => (value + 1) % scenes.length);
         setTyped(0);
         setStage(0);
@@ -53,7 +57,7 @@ export function HeroDemo({ scenes }: { scenes: DemoScene[] }) {
       }, HOLD_MS);
     }
     return () => window.clearTimeout(timer);
-  }, [phase, typed, stage, current, reduceMotion, scenes.length]);
+  }, [phase, typed, stage, current, reduceMotion, scenes.length, scene, selected]);
 
   const showResult = reduceMotion || phase === "result";
   const prompt = reduceMotion ? current.prompt : current.prompt.slice(0, typed);
@@ -99,10 +103,20 @@ export function HeroDemo({ scenes }: { scenes: DemoScene[] }) {
         </AnimatePresence>
       </div>
 
-      <div className="mx-auto w-full max-w-xs">
+      <div className="mx-auto w-full max-w-sm">
         <div className="relative" style={{ aspectRatio: aspectRatio("poster") }}>
+          {previous && phase === "typing" && !reduceMotion && (
+            <motion.div
+              aria-hidden
+              initial={{ opacity: 1, scale: 1 }}
+              animate={{ opacity: 0.28, scale: 0.97, transition: transitions.page }}
+              className="absolute inset-0 overflow-hidden rounded-control"
+            >
+              <HtmlFlyer doc={scenes[previous.scene]!.docs[previous.selected]!} className="size-full" />
+            </motion.div>
+          )}
           {phase === "generating" && !reduceMotion && <Skeleton className="absolute inset-0 rounded-control" />}
-          <AnimatePresence>
+          <AnimatePresence initial={false}>
             {showResult && (
               <motion.div
                 key={`${scene}-${selected}`}

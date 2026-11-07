@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { ApiException, handle, requireUser } from "@/lib/api/server";
+import { enforce, LIMITS } from "@/lib/rate-limit";
 import { photosConfigured, searchPhotos } from "@/lib/design/photos";
 
 export const dynamic = "force-dynamic";
 
 /** Stock photo search for the editor's Image panel (Unsplash; key stays server-side). */
 export const GET = handle(async (request: Request) => {
-  await requireUser();
+  const user = await requireUser();
+  await enforce(LIMITS.photos(user.id), "Searching very quickly — wait a moment and try again.");
   if (!photosConfigured()) throw new ApiException("PHOTOS_NOT_CONFIGURED", "Stock photos aren't set up on this server yet.");
   const url = new URL(request.url);
   const query = (url.searchParams.get("query") ?? "").trim().slice(0, 80);

@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { identify } from "@/lib/monitoring";
 import type { PlanId } from "@/lib/stripe/plans";
 
 export interface Viewer {
@@ -26,6 +27,8 @@ export function ViewerProvider({ initialViewer, children }: { initialViewer: Vie
   const setPlan = useCallback((plan: PlanId) => setViewer((v) => ({ ...v, plan })), []);
 
   const value = useMemo<ViewerContextValue>(() => ({ viewer, setCredits, setPlan }), [viewer, setCredits, setPlan]);
+  // Analytics events carry the account id (opaque UUID), never email or name.
+  useEffect(() => identify(viewer.id), [viewer.id]);
 
   return <ViewerContext.Provider value={value}>{children}</ViewerContext.Provider>;
 }

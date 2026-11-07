@@ -37,6 +37,9 @@ const icon = z.enum(ICON_NAMES as [IconName, ...IconName[]]);
 const nullableText = z.string().nullable();
 
 export const BriefSchema = z.object({
+  safety: z
+    .object({ violation: z.boolean(), category: nullableText })
+    .describe("The content-policy verdict for this request (see the policy in the instructions). violation true stops the design."),
   category: z.enum(CATEGORIES),
   audience: z.string().describe("Who the flyer speaks to, in a few words."),
   tone: z.array(z.string()).describe("Two to four adjectives for the emotional tone."),
@@ -73,6 +76,17 @@ export const BriefSchema = z.object({
     .describe("How much decoration: minimal (corporate, clinical, luxury restraint), balanced (most flyers), bold (parties, sales, kids, sport)."),
   motifs: z.array(z.enum(MOTIF_IDS)).describe("One to three decorative motifs, best first, that suit the mood."),
   brandColor: nullableText.describe("A hex colour only if the user named a brand colour."),
+  colors: z
+    .array(z.string())
+    .describe("Hex colours the user asked for, named colours converted (e.g. 'navy and gold' → ['#1B2A4A', '#C9A227']); empty if they named none."),
+  requirements: z
+    .array(z.string())
+    .describe("Every explicit instruction in the request — imagery, style, colours, mood, words to include, layout wishes — restated briefly. The design must satisfy each one."),
+  artwork: z
+    .string()
+    .describe(
+      "Art direction for the lead design, as you'd brief an illustrator: the subject and imagery the user asked for, the rendering style (e.g. 'bold flat vector illustration', 'cinematic photograph', 'risograph print', 'Swiss modernist poster', 'paper-cut collage', '3D render'), composition and where the type sits, lighting, texture. 1–3 sentences, no copy or words.",
+    ),
   photoQueries: z
     .array(z.string())
     .describe("0–3 stock-photo search queries (2–4 plain words each) for the layout's photo frames; empty for purely graphic designs."),
@@ -144,11 +158,14 @@ export function toDesignCopy(brief: DesignBrief): DesignCopy {
 export function rankedChoices(brief: DesignBrief) {
   const defaults = CATEGORY_DEFAULTS[brief.category];
   const pad = <T>(list: T[], fallback: T[]) => [...new Set([...list, ...fallback])].slice(0, 3);
+  // Colours the user named win over the palette: the first becomes primary, the second the accent.
+  const requested = [...new Set([...brief.colors, brief.brandColor].filter((c): c is string => isHex(c)).map(normalizeHex))];
   return {
     layouts: pad<ArchetypeId>(brief.layouts, defaults.layouts),
     palettes: pad<PaletteId>(brief.palettes, defaults.palettes),
     pairings: pad<PairingId>(brief.pairings, defaults.pairings),
-    brandColor: isHex(brief.brandColor) ? normalizeHex(brief.brandColor) : null,
+    brandColor: requested[0] ?? null,
+    accentColor: requested[1] ?? null,
     decor: { level: brief.decor, motifs: pad<MotifId>(brief.motifs, defaults.motifs) } satisfies Decor,
   };
 }
@@ -186,6 +203,26 @@ export const CATEGORY_DEFAULTS: Record<Category, CategoryDefaults> = {
   fitness: { palettes: ["power-orange", "hot-sale", "tech-violet"], pairings: ["impact", "poster-condensed", "geometric"], layouts: ["bold-stack", "swiss-type", "photo-overlay"], decor: "bold", motifs: ["stripes", "halftone", "plus"] },
   travel: { palettes: ["ocean-coral", "earth-green", "spring-garden"], pairings: ["geometric", "elegant", "friendly"], layouts: ["photo-overlay", "geometric-split", "editorial-split"], decor: "balanced", motifs: ["waves", "blobs", "sparkles"] },
   other: { palettes: ["trust-blue", "noir-mono", "spring-garden"], pairings: ["geometric", "editorial", "impact"], layouts: ["swiss-type", "editorial-split", "photo-overlay"], decor: "balanced", motifs: ["dots", "sparkles", "rings"] },
+};
+
+/** A visual concept per category for the rules fallback (the subject comes from the prompt). */
+const CATEGORY_ARTWORK: Record<Category, (subject: string) => string> = {
+  corporate: (s) => `A refined corporate poster about ${s}: clean geometric shapes, confident modern editorial layout with a bold sans-serif headline in generous white space.`,
+  health: (s) => `A calm, trustworthy healthcare poster about ${s}: soft natural light, clean shapes and a reassuring, uncluttered layout.`,
+  recruitment: (s) => `An energetic recruitment poster about ${s}: dynamic diagonal composition, bold condensed headline, confident people-focused imagery.`,
+  event: (s) => `An atmospheric event poster for ${s}: cinematic lighting, rich depth and texture, type set in clear space above the main image.`,
+  party: (s) => `A joyful celebration poster for ${s}: playful bold illustration, confetti and balloons, saturated colours, big friendly display type.`,
+  sale: (s) => `A high-impact retail sale poster about ${s}: bold graphic shapes, a huge offer number, punchy contrast and energetic composition.`,
+  real_estate: (s) => `An elegant real-estate poster for ${s}: architectural photography in golden-hour light, refined serif typography, calm luxurious spacing.`,
+  food: (s) => `A mouth-watering food poster for ${s}: overhead styled food photography, warm natural light, appetising textures, elegant type.`,
+  seasonal: (s) => `A warm seasonal poster for ${s}: rich seasonal colours and textures, gentle illustration, festive yet elegant typography.`,
+  education: (s) => `A bright, inviting education poster about ${s}: friendly illustration, clear structured layout, optimistic colours.`,
+  community: (s) => `A warm community poster for ${s}: hand-drawn friendly illustration, people together, inclusive cheerful colours.`,
+  tech: (s) => `A sleek technology poster about ${s}: abstract glowing gradients and geometric forms, futuristic minimal layout, crisp sans-serif type.`,
+  beauty: (s) => `A luxurious beauty poster for ${s}: soft pastel tones, elegant product-style lighting, refined serif and script typography.`,
+  fitness: (s) => `A high-energy fitness poster about ${s}: dramatic action photography, motion and grit, bold condensed type.`,
+  travel: (s) => `A dreamy travel poster for ${s}: vintage-modern illustrated landscape, sunlit colours, bold title in the sky area.`,
+  other: (s) => `A striking modern poster about ${s}: bold graphic composition, clear hierarchy, confident colours.`,
 };
 
 /** A call to action that promises nothing the user didn't say (no tickets, prices or dates). */
@@ -236,6 +273,7 @@ export function rulesBrief(prompt: string): DesignBrief {
   ].filter((d): d is { icon: IconName; text: string } => Boolean(d));
   const subhead = withoutLogistics(copy.details, [day, time, price].filter((t): t is string => Boolean(t)));
   return {
+    safety: { violation: false, category: null },
     category,
     audience: "general public",
     tone: [],
@@ -260,6 +298,9 @@ export function rulesBrief(prompt: string): DesignBrief {
     decor: defaults.decor,
     motifs: defaults.motifs,
     brandColor: null,
+    colors: [],
+    requirements: [],
+    artwork: CATEGORY_ARTWORK[category](rulesPhotoQueries(prompt, category)[0] ?? category.replace("_", " ")),
     photoQueries: rulesPhotoQueries(prompt, category),
   };
 }

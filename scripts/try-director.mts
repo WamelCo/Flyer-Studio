@@ -49,5 +49,8 @@ console.log(`Layouts:  ${brief.layouts.join(", ")}`);
 console.log(`Palettes: ${brief.palettes.join(", ")}`);
 console.log(`Pairings: ${brief.pairings.join(", ")}`);
 console.log(`Decor:    ${brief.decor} · ${brief.motifs.join(", ") || "—"}`);
+console.log(`Asked:    ${brief.requirements.join(" · ") || "—"}`);
+console.log(`Colours:  ${brief.colors.join(", ") || "—"}`);
+console.log(`Artwork:  ${brief.artwork || "—"}`);
 console.log(`Photos:   ${brief.photoQueries.join(" | ") || "—"}`);
 console.log(`Why:      ${brief.rationale}`);

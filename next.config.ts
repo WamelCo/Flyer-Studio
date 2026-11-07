@@ -1,4 +1,7 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
+
+import { securityHeaders } from "./lib/security-headers";
 
 const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
   ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
@@ -19,6 +22,26 @@ const nextConfig: NextConfig = {
       canvas: "./lib/empty-module.ts",
     },
   },
+  poweredByHeader: false,
+  // The design critic renders flyers on the server: resvg is a native module (never
+  // bundled) and needs the font files shipped alongside the generate route.
+  serverExternalPackages: ["@resvg/resvg-js"],
+  outputFileTracingIncludes: {
+    "/api/generate": ["./assets/fonts/**"],
+  },
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders() }];
+  },
 };
 
-export default nextConfig;
+// Source maps go to Sentry only when a token is configured (readable stack traces);
+// otherwise the build is untouched.
+export default process.env.SENTRY_AUTH_TOKEN
+  ? withSentryConfig(nextConfig, {
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      silent: true,
+      sourcemaps: { deleteSourcemapsAfterUpload: true },
+    })
+  : nextConfig;

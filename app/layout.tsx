@@ -1,11 +1,16 @@
 import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import type { ReactNode } from "react";
 
+import { Analytics } from "@/components/providers/analytics";
 import { MotionProvider } from "@/components/providers/motion-provider";
 import { PRODUCT_NAME } from "@/components/shell/wordmark";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import "./globals.css";
+
+// UI fallback for platforms without San Francisco (see --font-sans in globals.css).
+const ui = Inter({ subsets: ["latin"], variable: "--font-ui", display: "swap" });
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
@@ -25,10 +30,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={ui.variable}>
       <body className="bg-base text-fg">
         <MotionProvider>
           <TooltipProvider delayDuration={400}>{children}</TooltipProvider>
+          <Analytics />
         </MotionProvider>
       </body>
     </html>

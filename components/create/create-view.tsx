@@ -15,6 +15,8 @@ import { useShell } from "@/components/shell/shell-provider";
 import { Button } from "@/components/ui/button";
 import { InlineMessage } from "@/components/ui/inline-message";
 import { ApiError, apiFetch } from "@/lib/api/client";
+import { generateFlyer } from "@/lib/generation/client";
+import { track } from "@/lib/monitoring";
 import type { GenerateResponse, ProjectSummary } from "@/lib/api/contracts";
 import type { FlyerFormat } from "@/lib/canvas/types";
 import { saveThumbnail } from "@/lib/canvas/thumbnail";
@@ -30,7 +32,7 @@ const EXAMPLES = [
 
 type Generation =
   | { status: "idle" }
-  | { status: "generating"; format: FlyerFormat }
+  | { status: "generating"; format: FlyerFormat; stage?: string }
   | { status: "done"; result: GenerateResponse }
   | { status: "error"; error: ApiError };
 
@@ -153,10 +155,17 @@ export function CreateView({ recentProjects }: { recentProjects: ProjectSummary[
     // Focus mode: the sidebar steps aside while the canvas takes the stage.
     setCollapsed(true, { persist: false });
     setGeneration({ status: "generating", format });
+    const startedAt = performance.now();
+    track("generation_started", { format });
 
     try {
-      const result = await apiFetch<GenerateResponse>("/api/generate", { method: "POST", json: { prompt, format } });
+      const result = await generateFlyer(
+        { prompt, format },
+        (stage) => setGeneration((current) => (current.status === "generating" ? { ...current, stage } : current)),
+        setCredits,
+      );
       setCredits(result.balance);
+      track("generation_succeeded", { format, source: result.source, lead: result.directions[0]?.layout, ms: Math.round(performance.now() - startedAt) });
       setGeneration({ status: "done", result });
       router.refresh();
     } catch (caught) {
@@ -165,6 +174,7 @@ export function CreateView({ recentProjects }: { recentProjects: ProjectSummary[
         router.push("/login?next=/dashboard");
         return;
       }
+      track("generation_failed", { format, code: error.code });
       if (typeof error.details?.balance === "number") setCredits(error.details.balance);
       setGeneration({ status: "error", error });
     }
@@ -242,7 +252,7 @@ export function CreateView({ recentProjects }: { recentProjects: ProjectSummary[
           </AnimatePresence>
         </motion.section>
 
-        {generation.status === "generating" && <GeneratingFrame format={generation.format} />}
+        {generation.status === "generating" && <GeneratingFrame format={generation.format} stage={generation.stage} />}
         {generation.status === "done" && (
           <Result key={generation.result.jobId} result={generation.result} onReset={reset} onRetry={generate} />
         )}

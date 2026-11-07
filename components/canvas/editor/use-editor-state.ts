@@ -4,8 +4,8 @@ import { useCallback, useMemo, useReducer } from "react";
 
 import type { FlyerDoc } from "@/lib/canvas/types";
 
-/** .claude/rules/canvas-editor.md caps history at 20 steps (the rules override the brief's 50). */
-export const HISTORY_LIMIT = 20;
+/** .claude/rules/canvas-editor.md: 100 undo steps (raised from 20; see docs/ROADMAP.md). */
+export const HISTORY_LIMIT = 100;
 /** Edits sharing a coalesce key within this window become one undo step (typing, nudging, colour drags). */
 const COALESCE_MS = 800;
 

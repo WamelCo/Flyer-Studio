@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
 
 import { directDesign } from "@/lib/design/director";
 import { guardFacts } from "@/lib/design/facts";
-import { briefFromOpenModel, coerceBrief, openModelConfig, parseBrief, retryAfterMs, strictSchema, type OpenModelConfig } from "@/lib/design/open-model";
+import { briefFromOpenModel, coerceBrief, openModelConfig, outputLimitFrom, parseBrief, retryAfterMs, strictSchema, type OpenModelConfig } from "@/lib/design/open-model";
 
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -176,7 +176,7 @@ await test("no provider → null; missing key → null; presets fill base URL an
 
 // ── Mock provider ───────────────────────────────────────────────────────────
 
-type Handler = (body: Record<string, unknown>, call: number) => { status?: number; content?: string; finish?: string; retryAfter?: string };
+type Handler = (body: Record<string, unknown>, call: number) => { status?: number; content?: string; finish?: string; retryAfter?: string; message?: string };
 let handler: Handler = () => ({ content: JSON.stringify(good) });
 const calls: Record<string, unknown>[] = [];
 const server = createServer(async (req: IncomingMessage, res) => {
@@ -186,7 +186,7 @@ const server = createServer(async (req: IncomingMessage, res) => {
   calls.push({ ...body, auth: req.headers.authorization });
   const out = handler(body, calls.length);
   res.writeHead(out.status ?? 200, { "content-type": "application/json", ...(out.retryAfter && { "retry-after": out.retryAfter }) });
-  res.end(out.status && out.status >= 400 ? JSON.stringify({ error: { message: "mock error" } }) : JSON.stringify({ choices: [{ message: { content: out.content ?? "" }, finish_reason: out.finish ?? "stop" }] }));
+  res.end(out.status && out.status >= 400 ? JSON.stringify({ error: { message: out.message ?? "mock error" } }) : JSON.stringify({ choices: [{ message: { content: out.content ?? "" }, finish_reason: out.finish ?? "stop" }] }));
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -265,6 +265,19 @@ await test("retry hints parse from the header or Groq's message", () => {
   assert.equal(retryAfterMs(none, "try again in 1m2.5s"), 62500);
   assert.equal(retryAfterMs(none, "slow down"), null);
 });
+const TOO_LARGE =
+  "Request too large for model `qwen` on output tokens per minute (OTPM): Limit 1000, Requested 1600. The request's expected output tokens exceed the enforced limit; reduce max_tokens";
+await test("an allowance over the provider's per-minute output limit is lowered once and remembered", async () => {
+  assert.equal(outputLimitFrom(429, TOO_LARGE), 1000);
+  assert.equal(outputLimitFrom(429, "Rate limit reached … Limit 1000, Used 994, Requested 702. Please try again in 41s"), null, "an ordinary rate limit waits instead");
+  reset((body) => (Number(body.max_tokens) > 1000 ? { status: 429, message: TOO_LARGE } : { content: JSON.stringify(good) }));
+  const capped = { ...config("json_schema"), model: "mock-capped" };
+  assert.equal((await briefFromOpenModel(capped, "system", "user")).kind, "brief");
+  assert.deepEqual(calls.map((c) => c.max_tokens), [8192, 900]);
+  reset((body) => (Number(body.max_tokens) > 1000 ? { status: 429, message: TOO_LARGE } : { content: JSON.stringify(good) }));
+  assert.equal((await briefFromOpenModel(capped, "system", "user")).kind, "brief");
+  assert.deepEqual(calls.map((c) => c.max_tokens), [900], "no wasted request the second time");
+});
 await test("content filter / sensitive → refused", async () => {
   for (const finish of ["content_filter", "sensitive"]) {
     reset(() => ({ content: "", finish }));
@@ -301,6 +314,14 @@ await test("primary down → the fallback provider (LLM_FALLBACK_*) directs", as
   assert.equal(result.source, "open-model");
   assert.equal(result.model, "mock-glm via Custom");
   delete process.env.LLM_FALLBACK_PROVIDER;
+});
+await test("a policy violation in the brief stops the design as a refusal; a clean verdict passes", async () => {
+  reset(() => ({ content: JSON.stringify({ ...good, safety: { violation: true, category: "violence" } }) }));
+  await assert.rejects(directDesign("something violent", "poster"), (error: Error) => error.constructor.name === "DirectorRefusal" && /violence/.test(error.message));
+  reset(() => ({ content: JSON.stringify({ ...good, safety: { violation: false, category: null } }) }));
+  assert.equal((await directDesign("Summer jazz night", "poster")).source, "open-model");
+  reset(() => ({ content: JSON.stringify(good) })); // no verdict at all: treated as clean
+  assert.equal((await directDesign("Summer jazz night", "poster")).brief.safety.violation, false);
 });
 await test("a refusal surfaces as DirectorRefusal (the route shows the generic message)", async () => {
   reset(() => ({ content: "", finish: "content_filter" }));

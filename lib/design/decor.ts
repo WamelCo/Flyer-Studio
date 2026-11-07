@@ -1,8 +1,8 @@
 import type { FlyerNode } from "@/lib/canvas/types";
 import { contrast, hexToRgb, isDark, isHex, mix, rgbToHex } from "@/lib/design/color";
 import { circle, dotGrid, inkOn, path, rect, ring, type Ctx } from "@/lib/design/engine";
+import { bounds, intersect, overlaps, type Box } from "@/lib/design/geometry";
 import ICONS from "@/lib/design/icons.json";
-import { wrap } from "@/lib/design/metrics";
 
 /**
  * The spark: decorative motifs a designer adds once the type is set — confetti for a
@@ -75,38 +75,6 @@ export function decorate(ctx: Ctx, decor: Decor, seed: string) {
 }
 
 // ── Free space ──────────────────────────────────────────────────────────────
-
-interface Box {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-const overlaps = (a: Box, b: Box, pad = 0) =>
-  a.x < b.x + b.width + pad && a.x + a.width + pad > b.x && a.y < b.y + b.height + pad && a.y + a.height + pad > b.y;
-
-function textHeight(node: Extract<FlyerNode, { type: "text" }>) {
-  const style = { font: node.font, weight: node.fontWeight, size: node.fontSize, uppercase: node.uppercase, letterSpacing: node.letterSpacing };
-  return wrap(node.text, style, node.width + 1).length * node.fontSize * node.lineHeight;
-}
-
-/** Axis-aligned bounds of a node, rotation included (Konva rotates about x/y). */
-function bounds(node: FlyerNode): Box {
-  const width = node.width;
-  const height = node.type === "text" ? textHeight(node) : node.height;
-  if (!node.rotation) return { x: node.x, y: node.y, width, height };
-  const t = (node.rotation * Math.PI) / 180;
-  const corners = [
-    [0, 0],
-    [width, 0],
-    [0, height],
-    [width, height],
-  ].map(([dx, dy]) => [node.x + dx! * Math.cos(t) - dy! * Math.sin(t), node.y + dx! * Math.sin(t) + dy! * Math.cos(t)]);
-  const xs = corners.map((c) => c[0]!);
-  const ys = corners.map((c) => c[1]!);
-  return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
-}
 
 class Space {
   readonly occupied: Box[];
@@ -249,13 +217,6 @@ class Space {
   }
 }
 
-function intersect(a: Box, b: Box): Box | null {
-  const x = Math.max(a.x, b.x);
-  const y = Math.max(a.y, b.y);
-  const right = Math.min(a.x + a.width, b.x + b.width);
-  const bottom = Math.min(a.y + a.height, b.y + b.height);
-  return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : null;
-}
 
 /** rgba(...) or hex → hex (alpha dropped: close enough to choose a contrasting colour). */
 function solid(color: string) {

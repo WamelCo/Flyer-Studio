@@ -152,6 +152,11 @@ export type Database = {
       };
       generation_jobs: {
         Row: {
+          error_message: string | null;
+          heartbeat_at: string | null;
+          result: Json | null;
+          stage: string | null;
+          started_at: string | null;
           completed_at: string | null;
           created_at: string;
           credits_spent: number;
@@ -166,6 +171,11 @@ export type Database = {
           variations: Json;
         };
         Insert: {
+          error_message?: string | null;
+          heartbeat_at?: string | null;
+          result?: Json | null;
+          stage?: string | null;
+          started_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
           credits_spent?: number;
@@ -180,6 +190,11 @@ export type Database = {
           variations?: Json;
         };
         Update: {
+          error_message?: string | null;
+          heartbeat_at?: string | null;
+          result?: Json | null;
+          stage?: string | null;
+          started_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
           credits_spent?: number;
@@ -193,6 +208,12 @@ export type Database = {
           user_id?: string;
           variations?: Json;
         };
+        Relationships: [];
+      };
+      rate_limits: {
+        Row: { hits: number; key: string; window_start: string };
+        Insert: { hits?: number; key: string; window_start: string };
+        Update: { hits?: number; key?: string; window_start?: string };
         Relationships: [];
       };
       profiles: {
@@ -251,7 +272,12 @@ export type Database = {
         Args: { p_amount: number; p_idempotency_key: string; p_reason: string; p_user_id: string };
         Returns: number;
       };
+      fail_stale_generation_jobs: { Args: never; Returns: number };
       purge_expired_free_projects: { Args: never; Returns: number };
+      rate_limit_hit: {
+        Args: { p_key: string; p_limit: number; p_window_seconds: number };
+        Returns: { allowed: boolean; remaining: number; reset_at: string }[];
+      };
     };
     Enums: {
       billing_interval: "month" | "year";

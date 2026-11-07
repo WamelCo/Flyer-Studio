@@ -1,8 +1,12 @@
 "use client";
 
-import { Button, ButtonLink } from "@/components/ui/button";
+import { useEffect } from "react";
 
-export default function ErrorPage({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+import { Button, ButtonLink } from "@/components/ui/button";
+import { reportError } from "@/lib/monitoring";
+
+export default function ErrorPage({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => reportError(error, { digest: error.digest }), [error]);
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
       <h1 className="text-title text-fg">Something went wrong.</h1>

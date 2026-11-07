@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { z } from "zod";
 
 import type { ApiErrorBody, ApiErrorCode } from "@/lib/api/types";
+import { reportError } from "@/lib/monitoring";
 import { createClient } from "@/lib/supabase/server";
 
 const STATUS: Record<ApiErrorCode, number> = {
@@ -14,6 +15,7 @@ const STATUS: Record<ApiErrorCode, number> = {
   GENERATION_FAILED: 502,
   GENERATION_BLOCKED: 422,
   GENERATION_TIMEOUT: 504,
+  RATE_LIMITED: 429,
   AI_NOT_CONFIGURED: 503,
   PHOTOS_NOT_CONFIGURED: 503,
   PHOTOS_UNAVAILABLE: 502,
@@ -38,7 +40,9 @@ export class ApiException extends Error {
 
 export function apiError(code: ApiErrorCode, message: string, details?: Record<string, unknown>) {
   const body: ApiErrorBody = details ? { error: code, message, details } : { error: code, message };
-  return NextResponse.json(body, { status: STATUS[code] });
+  // Rate limits tell well-behaved clients when to come back.
+  const retryAfter = typeof details?.retryAfter === "number" ? { "Retry-After": String(Math.ceil(details.retryAfter)) } : undefined;
+  return NextResponse.json(body, { status: STATUS[code], headers: retryAfter });
 }
 
 /** Wraps a route handler so every failure path produces `{ error, message }`. */
@@ -52,6 +56,7 @@ export function handle<Args extends unknown[]>(fn: (...args: Args) => Promise<Re
         return apiError("AUTH_NOT_CONFIGURED", "Supabase is not configured on this server.");
       }
       console.error("[api] unhandled error", error);
+      reportError(error);
       return apiError("INTERNAL_ERROR", "Something went wrong on our side. Please try again.");
     }
   };
