@@ -7,6 +7,7 @@ import { DECOR_LEVELS, MOTIF_IDS } from "@/lib/design/decor";
 import { ICON_NAMES, type IconName } from "@/lib/design/engine";
 import { PALETTE_IDS } from "@/lib/design/palettes";
 import { PAIRING_IDS } from "@/lib/design/typography";
+import { log } from "@/lib/log";
 
 /**
  * Art direction from an open-weight model (Qwen, GLM, DeepSeek …) over any
@@ -65,7 +66,7 @@ export interface OpenModelConfig {
  * The configured open model, or null when none is set up (or the config is incomplete).
  * `prefix` selects the primary (LLM_*) or the fallback provider (LLM_FALLBACK_*).
  */
-export function openModelConfig(env: NodeJS.ProcessEnv = process.env, prefix: "LLM_" | "LLM_FALLBACK_" = "LLM_"): OpenModelConfig | null {
+export function openModelConfig(env: NodeJS.ProcessEnv = process.env, prefix: "LLM_" | "LLM_FALLBACK_" | "CRITIC_" = "LLM_"): OpenModelConfig | null {
   const read = (name: string) => env[`${prefix}${name}`]?.trim() || undefined;
   const provider = read("PROVIDER")?.toLowerCase() as OpenProviderId | undefined;
   if (!provider || !OPEN_PROVIDERS.includes(provider)) return null;
@@ -116,23 +117,61 @@ export async function briefFromOpenModel(config: OpenModelConfig, system: string
 
 // ── Transport ───────────────────────────────────────────────────────────────
 
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+export type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string | ContentPart[] };
 
-async function complete(config: OpenModelConfig, messages: ChatMessage[]) {
+/** A JSON Schema the reply must follow, with the name the provider reports it under. */
+export interface ReplySchema {
+  name: string;
+  schema: Record<string, unknown>;
+}
+
+const briefReply = (): ReplySchema => ({ name: "design_brief", schema: strictSchema() });
+
+/**
+ * Output caps learnt from providers, per model. Free tiers meter output per minute (Groq:
+ * 1,000 tokens/min) and refuse outright — not "wait and retry" — any request whose
+ * allowance exceeds that, so the allowance is lowered once and remembered.
+ */
+const outputCaps = new Map<string, number>();
+
+/** "Request too large … Limit 1000, Requested 1600" → 1000. */
+export function outputLimitFrom(status: number, text: string): number | null {
+  if (status !== 429 && status !== 413 && status !== 400) return null;
+  if (!/request too large|exceed the enforced limit|reduce max_tokens/i.test(text)) return null;
+  const limit = Number(/\bLimit:? (\d+)/i.exec(text)?.[1]);
+  return limit > 0 ? limit : null;
+}
+
+async function complete(config: OpenModelConfig, messages: ChatMessage[], reply: ReplySchema = briefReply(), temperature = 0.7, maxTokens = 8192) {
   const strict = config.format === "json_schema";
+  const started = Date.now();
+  const capKey = `${config.baseUrl}|${config.model}`;
   const body = {
     model: config.model,
     messages,
-    temperature: 0.7,
-    max_tokens: 8192,
-    response_format: strict ? { type: "json_schema", json_schema: { name: "design_brief", strict: true, schema: strictSchema() } } : { type: "json_object" },
+    temperature,
+    // Small questions ask for a small allowance: free tiers check it against the minute's budget.
+    max_tokens: Math.min(maxTokens, outputCaps.get(capKey) ?? Infinity),
+    response_format: strict ? { type: "json_schema", json_schema: { name: reply.name, strict: true, schema: reply.schema } } : { type: "json_object" },
     ...config.extra,
   };
   let response = await post(config, body);
+  const limit = response.ok ? null : outputLimitFrom(response.status, await response.clone().text().catch(() => ""));
+  if (limit && limit < body.max_tokens) {
+    outputCaps.set(capKey, Math.floor(limit * 0.9));
+    log.warn("llm.output_capped", { model: config.model, limit, max_tokens: Math.floor(limit * 0.9) });
+    body.max_tokens = Math.floor(limit * 0.9);
+    response = await post(config, body);
+  }
   // Some models on a provider reject strict schemas or preset extras: retry once in plain
   // JSON mode, which needs the schema spelled out in the prompt instead.
   if (response.status === 400 && (strict || Object.keys(config.extra).length)) {
-    const prompted = messages.map((m, i) => (i === 0 && m.role === "system" && !m.content.includes(SCHEMA_MARKER) ? { ...m, content: withSchema(m.content.replace(/\n\nReply with only the JSON object\.$/, "")) } : m));
+    const prompted = messages.map((m, i) =>
+      i === 0 && m.role === "system" && typeof m.content === "string" && !m.content.includes(SCHEMA_MARKER)
+        ? { ...m, content: withSchema(m.content.replace(/\n\nReply with only the JSON object\.$/, ""), reply.schema) }
+        : m,
+    );
     const plain: Record<string, unknown> = { model: body.model, messages: prompted, temperature: body.temperature, max_tokens: body.max_tokens, response_format: { type: "json_object" } };
     response = await post(config, plain);
   }
@@ -140,9 +179,13 @@ async function complete(config: OpenModelConfig, messages: ChatMessage[]) {
     const detail = (await response.text().catch(() => "")).slice(0, 300);
     throw new Error(`HTTP ${response.status}${response.status === 401 || response.status === 403 ? " (check LLM_API_KEY)" : response.status === 429 ? " (rate limited)" : ""} ${detail}`);
   }
-  const data = (await response.json()) as { choices?: { message?: { content?: string | null }; finish_reason?: string }[] };
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: string | null }; finish_reason?: string }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
   const choice = data.choices?.[0];
   const finishReason = choice?.finish_reason ?? "unknown";
+  log.info("llm.usage", { model: config.model, task: reply.name, input: data.usage?.prompt_tokens, output: data.usage?.completion_tokens, ms: Date.now() - started });
   return {
     content: choice?.message?.content ?? "",
     finishReason,
@@ -204,8 +247,12 @@ let cachedSchema: Record<string, unknown> | null = null;
 
 /** BriefSchema as JSON Schema, tightened for strict decoding (every field required, no extras). */
 export function strictSchema() {
-  if (cachedSchema) return cachedSchema;
-  const schema = z.toJSONSchema(BriefSchema) as Record<string, unknown>;
+  return (cachedSchema ??= toStrictJsonSchema(BriefSchema));
+}
+
+/** A zod schema as JSON Schema tightened for strict decoding (every field required, no extras). */
+export function toStrictJsonSchema(zodSchema: z.ZodType) {
+  const schema = z.toJSONSchema(zodSchema) as Record<string, unknown>;
   delete schema.$schema;
   const tighten = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
@@ -218,14 +265,50 @@ export function strictSchema() {
     Object.values(obj).forEach(tighten);
   };
   tighten(schema);
-  cachedSchema = schema;
   return schema;
+}
+
+/**
+ * Any structured question to the open model — text and/or images in, validated JSON out
+ * — with the same cleaning, one repair round and refusal handling as the brief.
+ * Never throws.
+ */
+export async function askOpenModel<T>(
+  config: OpenModelConfig,
+  request: { system: string; content: string | ContentPart[]; schema: z.ZodType<T>; name: string; coerce?: (raw: unknown) => unknown; temperature?: number; maxTokens?: number },
+): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+  const reply: ReplySchema = { name: request.name, schema: toStrictJsonSchema(request.schema) };
+  const messages: ChatMessage[] = [
+    { role: "system", content: config.format === "json_schema" ? `${request.system}\n\nReply with only the JSON object.` : withSchema(request.system, reply.schema) },
+    { role: "user", content: request.content },
+  ];
+  const parse = (content: string) => {
+    const json = extractJson(content);
+    if (json === undefined) return { ok: false as const, error: "no JSON object found" };
+    const result = request.schema.safeParse(request.coerce ? request.coerce(json) : json);
+    return result.success
+      ? { ok: true as const, value: result.data }
+      : { ok: false as const, error: result.error.issues.slice(0, 6).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ") };
+  };
+  try {
+    let answer = await complete(config, messages, reply, request.temperature ?? 0.2, request.maxTokens);
+    if (answer.refused) return { ok: false, reason: `refused (${answer.finishReason})` };
+    let parsed = parse(answer.content);
+    if (!parsed.ok) {
+      messages.push({ role: "assistant", content: answer.content }, { role: "user", content: `That reply did not match the schema: ${parsed.error}. Reply again with only the corrected JSON object.` });
+      answer = await complete(config, messages, reply, request.temperature ?? 0.2, request.maxTokens);
+      parsed = parse(answer.content);
+    }
+    return parsed.ok ? { ok: true, value: parsed.value } : { ok: false, reason: parsed.error };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 const SCHEMA_MARKER = "It must match this JSON Schema exactly";
 
-function withSchema(system: string) {
-  return `${system}\n\nReply with a single JSON object and nothing else — no prose, no code fences. ${SCHEMA_MARKER} (use null for unknown text fields and [] for empty lists):\n${JSON.stringify(strictSchema())}`;
+function withSchema(system: string, schema: Record<string, unknown> = strictSchema()) {
+  return `${system}\n\nReply with a single JSON object and nothing else — no prose, no code fences. ${SCHEMA_MARKER} (use null for unknown text fields and [] for empty lists):\n${JSON.stringify(schema)}`;
 }
 
 // ── Parsing and coercion ────────────────────────────────────────────────────

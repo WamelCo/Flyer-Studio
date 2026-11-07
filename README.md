@@ -42,6 +42,9 @@ Project rules live in `CLAUDE.md` and `.claude/rules/`. Layout is described in `
   event is delivered twice, credits must land exactly once, cancellation drops to Free; then it cleans up.
 - `pnpm test:director` — the open-model art director against a mock provider (messy replies, repair round,
   strict-schema fallback, rate limits, refusals). `pnpm audit:contrast` — WCAG contrast across every design.
+- `pnpm test:design` — design lint, the server renderer and the critic's review → compare loop against a mock
+  vision model. `pnpm benchmark` — 100 prompts × every format through the engine; fails on any lint error
+  (`--render` writes contact sheets to `benchmark-report/`).
 - Webhook replay: after a test checkout (card 4242 4242 4242 4242), `pnpm stripe:webhooks --replay --since=30 --once`
   delivers every recent event twice and fails unless each second delivery is ignored as a duplicate. Credit grants
   are also keyed `invoice:<id>` in the ledger, so checkout.session.completed and invoice.paid for the same payment

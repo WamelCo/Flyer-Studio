@@ -8,7 +8,7 @@ Run two of everything so changes are proven before customers see them.
 | --- | --- | --- |
 | Supabase | its own project (free tier is fine) | its own project, Pro plan (point-in-time recovery) |
 | Stripe | test mode keys | live mode keys (`pnpm stripe:setup` refuses live keys — create live prices in the dashboard) |
-| AI keys | the same free Groq key is fine | a separate key, so limits don't collide |
+| AI keys | the same free Groq key is fine | a separate key, so limits don't collide — and a paid tier: Groq's free tier allows ~1 generation per minute site-wide (1,000 output tokens/min) |
 | URL | e.g. `staging.flyerstudio.app` | your domain |
 
 Copy `.env.example` into each environment's settings. `NEXT_PUBLIC_*` values are baked in at build time, so rebuild after changing them.

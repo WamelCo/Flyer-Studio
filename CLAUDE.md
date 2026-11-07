@@ -47,3 +47,6 @@ pnpm test:db                     # Credit ledger, jobs, rate limits — real mig
 pnpm test:jobs                   # Background generation client (polling, failures, timeouts)
 pnpm test:e2e                    # Playwright smoke tests against a production build (pnpm build first)
 pnpm test:generation [--http] [--sweeper]  # Real pipeline end to end (throwaway user); --http needs pnpm dev
+pnpm test:design                 # Design lint, server renderer, critique → compare loop (mock vision model)
+pnpm benchmark [--render] [--live --limit N]  # 100-prompt design benchmark; fails on any lint error
+```

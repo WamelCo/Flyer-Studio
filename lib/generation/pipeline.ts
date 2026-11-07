@@ -8,6 +8,7 @@ import { directDesign } from "@/lib/design/director";
 import { ideogramConfigured, ideogramDirection } from "@/lib/design/ideogram";
 import { PALETTES, withBrandColor } from "@/lib/design/palettes";
 import { photosForBrief, placedPhotos, trackDownloads } from "@/lib/design/photos";
+import { reviewAndRefine, type Slot } from "@/lib/design/refine";
 import { PAIRINGS } from "@/lib/design/typography";
 import { ideogramAllowed } from "@/lib/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -15,7 +16,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const VARIATIONS = 3;
 
 /** Where a job is, in the order it happens. The client shows a sentence for each. */
-export const STAGES = ["queued", "directing", "designing", "composing", "saving"] as const;
+export const STAGES = ["queued", "directing", "designing", "composing", "reviewing", "saving"] as const;
 export type Stage = (typeof STAGES)[number];
 
 export interface GenerationInput {
@@ -73,14 +74,33 @@ export async function designFlyer(input: GenerationInput, onStage: (stage: Stage
   // directions in the second and third, keeping its best layouts.
   const variants = lead ? ranked.slice(0, 2).map((v, i) => ({ ...v, palette: ranked[i + 1]!.palette, pairing: ranked[i + 1]!.pairing })) : ranked;
   const offset = lead ? 1 : 0;
-  const engineDocs = variants.map((variant, i) =>
-    composeDesign({ format, copy, variant, photos: photoSets[i] ?? [], decor: decorForVariant(choices.decor, i + offset), ...colours }),
-  );
-  const docs = lead ? [lead.doc, ...engineDocs] : engineDocs;
+  const richCopy = hasRichCopy(copy);
+  const slots: Slot[] = [
+    ...(lead
+      ? [{ doc: lead.doc, variant: null, photos: [], decor: decorForVariant(choices.decor, 0), copy, label: { layout: "Ideogram design", palette: PALETTES[choices.palettes[0]!].name, type: PAIRINGS[choices.pairings[0]!].name } }]
+      : []),
+    ...variants.map((variant, i) => {
+      const photos = photoSets[i] ?? [];
+      const decor = decorForVariant(choices.decor, i + offset);
+      return {
+        doc: composeDesign({ format, copy, variant, photos, decor, ...colours }),
+        variant,
+        photos,
+        decor,
+        copy,
+        label: { layout: ARCHETYPES[variant.archetype].name, palette: PALETTES[variant.palette].name, type: PAIRINGS[variant.pairing].name },
+      };
+    }),
+  ];
+
+  // The creative director's review: fix what is weak, keep what scores better, lead with the best.
+  await onStage("reviewing");
+  const reviewed = await reviewAndRefine(slots, { brief, choices, format, colours, richCopy });
+  const docs = reviewed.map((slot) => slot.doc);
 
   // Unsplash counts a photo as used when it lands in a design the user keeps. The first
   // direction becomes the project now; the client reports another one if it is opened.
-  const photoDownloads = [...(lead ? [[] as string[]] : []), ...engineDocs.map((doc, i) => placedPhotos(doc, photoSets[i] ?? []).map((p) => p.downloadLocation))];
+  const photoDownloads = reviewed.map((slot) => placedPhotos(slot.doc, slot.photos).map((p) => p.downloadLocation));
   trackDownloads(photoDownloads[0]!.map((downloadLocation) => ({ downloadLocation })));
 
   await onStage("saving");
@@ -91,10 +111,7 @@ export async function designFlyer(input: GenerationInput, onStage: (stage: Stage
     .single();
   if (projectError) throw new Error(`project insert failed: ${projectError.message}`);
 
-  const directions = [
-    ...(lead ? [{ layout: "Ideogram design", palette: PALETTES[choices.palettes[0]!].name, type: PAIRINGS[choices.pairings[0]!].name }] : []),
-    ...variants.map((v) => ({ layout: ARCHETYPES[v.archetype].name, palette: PALETTES[v.palette].name, type: PAIRINGS[v.pairing].name })),
-  ];
+  const directions = reviewed.map((slot) => ({ ...slot.label, ...(slot.review && { score: slot.review.overall }) }));
 
   return {
     response: { jobId, projectId: project.id, format, docs, directions, rationale: brief.rationale, source, photoDownloads },
@@ -102,7 +119,15 @@ export async function designFlyer(input: GenerationInput, onStage: (stage: Stage
       intent: storedIntent(brief.category),
       project_id: project.id,
       variations: JSON.parse(
-        JSON.stringify({ source, model, brief, variants, ideogram: lead ? { prompt: lead.prompt } : null, photos: photoSets.map((set) => set.map((p) => p.url)) }),
+        JSON.stringify({
+          source,
+          model,
+          brief,
+          variants: reviewed.map((slot) => slot.variant),
+          reviews: reviewed.map((slot) => slot.review ?? null),
+          ideogram: lead ? { prompt: lead.prompt } : null,
+          photos: photoSets.map((set) => set.map((p) => p.url)),
+        }),
       ),
     },
   };

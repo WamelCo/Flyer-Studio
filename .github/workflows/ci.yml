@@ -58,6 +58,12 @@ jobs:
       - name: WCAG contrast audit
         run: pnpm audit:contrast
 
+      - name: Design lint, renderer and review loop (mock vision model)
+        run: pnpm test:design
+
+      - name: Design benchmark (100 prompts × every format, lint gate)
+        run: pnpm benchmark
+
       - name: Production build
         run: pnpm build
 

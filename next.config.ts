@@ -23,6 +23,12 @@ const nextConfig: NextConfig = {
     },
   },
   poweredByHeader: false,
+  // The design critic renders flyers on the server: resvg is a native module (never
+  // bundled) and needs the font files shipped alongside the generate route.
+  serverExternalPackages: ["@resvg/resvg-js"],
+  outputFileTracingIncludes: {
+    "/api/generate": ["./assets/fonts/**"],
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders() }];
   },

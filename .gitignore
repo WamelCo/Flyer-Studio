@@ -21,3 +21,8 @@ Thumbs.db
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+# Benchmark output
+/benchmark-report/
+/benchmark-report.json
+/scripts/.tmp/

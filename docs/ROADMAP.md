@@ -61,7 +61,17 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 
 **Done when:** p95 time to first design ≤ 20 s (engine) / ≤ 60 s (Ideogram); a week of beta with zero unhandled Sentry errors; every check runs in CI.
 
-## Phase 1 — World-class design quality (2–4 weeks)
+## Phase 1 — World-class design quality (2–4 weeks) — 🟡 milestone A built Nov 7, 2026
+
+**Status — milestone A (measure and self-correct):**
+- **Server rendering:** FlyerDoc → SVG → PNG with resvg and 40 OFL font files in `assets/fonts` (`lib/render/`), matching the canvas. A three-up sheet renders in ~65 ms.
+- **Design lint** (`lib/design/lint.ts`): cut-off or colliding type (line by line), tiny text, edge crowding, empty frames, weak hierarchy. Lint errors trigger a layout swap.
+- **Benchmark:** 100 prompts × every format = 1,200 designs in under a second; 0 lint errors, score 100/100. In CI (`pnpm benchmark`); `--render` writes contact sheets, `--live` uses the real art director.
+- **Critic + refine:** one wide contact sheet per review (~785 image tokens vs ~1,800 for one portrait). Fixes are applied, then each revision is **compared side by side with its original** — absolute re-scores drifted by up to 2.4 points on unchanged designs, more than a revision gains. Live result: a revision kept at 6.6 → 8.6, another rejected (original preferred 8 to 5).
+- **Found:** Groq's free tier allows Qwen only **1,000 output tokens per minute**; a brief uses ~650–700, so the art director and critic can't both run in one minute, and the whole site manages ~1 generation per minute. The critic skips gracefully. Fix: a separate critic provider (`CRITIC_*`), or Groq's paid Dev Tier for production — see decision 5.
+- **Found:** with no photos and a one-line message only 2 of 5 layouts are usable, so two directions share a layout — the layout milestone below fixes it (`pnpm test:design` pins the gap).
+
+**Next:** 5 → 15+ layouts, then typography, imagery, learning from use.
 
 | Deliverable | Approach |
 | --- | --- |
@@ -122,6 +132,7 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 2. **Credit economics.** Price an Ideogram lead with `pnpm ideogram:quote`, then set generation credits so Pro and Max stay profitable.
 3. **First customer.** Self-serve small businesses first (recommended), then teams and agencies, then enterprise when deals ask for SSO.
 4. **Model hosting policy.** Groq (US) is fine for most buyers; Z.AI and DeepSeek host in China — enterprise tenants may need them disabled.
+5. **Model capacity for launch.** Groq's free tier caps Qwen at 1,000 output tokens per minute — about one generation per minute for the whole site, with no room for the critic. Options: Groq Dev Tier (pay per token; a generation is ~6k input + ~1k output tokens, a fraction of a cent), a second free provider for the critic (`CRITIC_*`, e.g. Z.AI's free GLM vision model), or both.
 
 ## Rule changes
 
@@ -130,7 +141,7 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 | `.claude/rules/canvas-editor.md` | Undo history 20 → 100 steps | Applied |
 | `CLAUDE.md` | Points to this roadmap; lists approved additions (Inngest, Upstash, Sentry, PostHog, Resend, WorkOS, Gelato, resvg) to adopt with their phase | Applied |
 | `.claude/rules/pricing.md` | Add Team (per seat) and Enterprise tiers | Waiting on decision 2–3 |
-| `.claude/rules/ai-generation.md` | Add the critique loop and benchmark gate | With Phase 1 |
+| `.claude/rules/ai-generation.md` | Add the critique loop and benchmark gate | Applied (Phase 1 milestone A) |
 
 ## Research sources
 

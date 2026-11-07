@@ -15,6 +15,7 @@ const BY_STAGE: Record<string, string[]> = {
   directing: ["Reading your brief…", "Choosing colours and type…", "Writing the copy…"],
   designing: ["Finding photography…", "Designing the lead direction…", "Refining the artwork…", "Setting the type on the artwork…", "Almost there…"],
   composing: ["Composing three directions…"],
+  reviewing: ["Reviewing the designs…", "Refining the weakest direction…", "Choosing the strongest…"],
   saving: ["Saving your designs…"],
   done: ["Ready."],
 };

@@ -38,7 +38,7 @@ Ideogram is the only image model; it is used for artwork, never for final text.
 5. Follow the request: the brief's `requirements` lists every explicit instruction (imagery, style,
    colours, words, layout wishes) and each must be honoured; named colours go in `colors` and
    override the palette (`withBrandColor` primary + accent, contrast recomputed).
-6. Test changes with `pnpm test:director` and `pnpm test:ideogram` (mock providers); try real keys
+6. Test changes with `pnpm test:director`, `pnpm test:ideogram` and `pnpm test:design` (mock providers); try real keys
    with `pnpm director:try "<prompt>"`; price Ideogram with `pnpm ideogram:quote` (dry run).
 
 ## Design Principles (enforced by the engine)
@@ -54,6 +54,30 @@ Ideogram is the only image model; it is used for artwork, never for final text.
   three motifs from `lib/design/decor.ts`; `decorate()` places them only in the layout's free
   space, behind every text node, seeded so a brief always decorates the same way. Never draw
   decoration over type; each of the three directions leads with a different motif.
+
+## Review → refine (Phase 1)
+- Every generation is checked before it ships (`lib/design/refine.ts`, stage `reviewing`):
+  1. `lintDoc()` (`lib/design/lint.ts`) — cut-off or colliding type, tiny text, edge crowding,
+     empty frames, weak hierarchy. A design with lint errors gets a layout swap, critic or not.
+  2. The critic (`lib/design/critic.ts`) renders the three directions server-side
+     (`lib/render/` — resvg, the OFL fonts in `assets/fonts`) on one wide contact sheet and a
+     vision model scores each on a rubric and picks fixes from `FIXES`.
+  3. Engine directions under 8.5 get their fixes applied; an Ideogram lead under 6 is replaced
+     by an engine design (never a second paid image).
+  4. Each revision is judged **side by side with its original** (`compare()`), never by a
+     fresh absolute score — re-scores drift by more than a revision gains. A revision is kept
+     only when the critic prefers it; its score moves by the difference seen in that comparison.
+     The model isn't told which version is the revision.
+  5. Strongest direction first.
+- The critic uses `CRITIC_*` when set (its own per-minute budget), else the art director's
+  models; `CRITIC=off` disables it. Any failure keeps the designs as they are — a review never
+  fails a generation.
+- Free tiers meter output per model per minute (Groq free: 1,000 tokens/min; a brief is
+  ~650–700, a critique ~240, a comparison ~140). Ask for small `maxTokens`; `complete()` learns a
+  provider's output cap from "request too large" and remembers it.
+- Gates: `pnpm test:design` (lint, renderer, review loop on a mock vision model) and
+  `pnpm benchmark` (100 prompts × every format, exit 1 on any lint error) run in CI. Run
+  `pnpm benchmark --render` and look at `benchmark-report/` after any layout or engine change.
 
 ## Photos
 - Stock photography from Unsplash (`lib/design/photos.ts`): hotlink, credit the photographer,
