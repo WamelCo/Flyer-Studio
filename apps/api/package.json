@@ -14,7 +14,8 @@
     "stripe:setup": "tsx --env-file-if-exists=../../.env scripts/stripe-setup.mts",
     "stripe:webhooks": "tsx --env-file-if-exists=../../.env scripts/stripe-webhooks.mts",
     "test:stripe": "tsx --env-file-if-exists=../../.env scripts/test-stripe-webhooks.mts",
-    "generate:try": "tsx --env-file-if-exists=../../.env scripts/try-generate.mts"
+    "generate:try": "tsx --env-file-if-exists=../../.env scripts/try-generate.mts",
+    "zw:simulate": "tsx --env-file-if-exists=../../.env scripts/zw-simulate.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

@@ -63,7 +63,8 @@ export async function renderVariants(
   store: StoreRender,
   options: { timeoutMs?: number } = {},
 ): Promise<RenderedVariant[]> {
-  const timeoutMs = options.timeoutMs ?? 120_000;
+  // Ideogram usually answers in 15–90s but has slow spells; the web proxy allows 240s.
+  const timeoutMs = options.timeoutMs ?? 180_000;
   return Promise.all(
     docs.map(async (doc, index): Promise<RenderedVariant> => {
       const fallback = withoutPlaceholderPhotos(doc);

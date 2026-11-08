@@ -57,6 +57,8 @@ export interface RenderMeta {
    * or as bounding-box elements (stronger, but the model tends to outline them as panels).
    */
   negativeSpace?: "prose" | "boxes";
+  /** Where the flyer will be used ("Zimbabwe"): photos show local places and people. */
+  region?: string;
 }
 
 /** Ideogram 4.5 only accepts its preset sizes; each format renders at the nearest one. */
@@ -466,7 +468,9 @@ export function compileRenderPrompt(doc: FlyerDoc, meta: RenderMeta): IdeogramPr
     }
 
     if (node.type === "image") {
-      const subject = photos[photoIndex++ % Math.max(1, photos.length)] ?? `a scene that fits ${meta.subject}`;
+      const subjectText = photos[photoIndex++ % Math.max(1, photos.length)] ?? `a scene that fits ${meta.subject}`;
+      // The audience should see themselves: photos are set in the flyer's market.
+      const subject = meta.region ? `${subjectText}, photographed in ${meta.region} with local people` : subjectText;
       if (coversPage(doc, box)) {
         // A photo backdrop is the most important "element": state it first, full frame.
         background[0] = `A full-bleed photograph of ${subject} fills the entire page edge to edge`;

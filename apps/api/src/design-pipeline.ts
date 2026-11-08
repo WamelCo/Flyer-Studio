@@ -62,5 +62,6 @@ export function renderMeta(brief: DesignBrief, variant: Variant): RenderMeta {
     subject: `${brief.category.replace("_", " ")} flyer for ${brief.audience}`,
     tone: brief.tone,
     photoPrompts: brief.photoQueries,
+    region: process.env.MARKET_REGION || undefined,
   };
 }

@@ -318,7 +318,10 @@ export function rulesBrief(prompt: string): DesignBrief {
   const copy = extractCopy(contact.rest || prompt, intent);
   const defaults = CATEGORY_DEFAULTS[category];
   // US$ / $ / € / £ and ZiG, with thousands separators: "US$1,200", "ZiG 31,000".
-  const priceMatch = /(?:US\$|[$€£])\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\bZiG\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/i.exec(prompt);
+  const PRICE_PATTERN = /(?:US\$|[$€£])\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\bZiG\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/gi;
+  // One price gets its own row; a price list (a menu, specials) keeps each price with its item.
+  const priceList = (prompt.match(PRICE_PATTERN) ?? []).length > 1;
+  const priceMatch = priceList ? null : new RegExp(PRICE_PATTERN.source, "i").exec(prompt);
   const price = priceMatch?.[0];
   // "from US$1,200" is a starting price, not the price.
   const priceText = price && /\bfrom\s*$/i.test(prompt.slice(0, priceMatch!.index)) ? `From ${price}` : price;
@@ -338,7 +341,17 @@ export function rulesBrief(prompt: string): DesignBrief {
     fresh(price) ? { icon: "ticket" as IconName, text: priceText! } : null,
     ...contact.otherPhones.map((text) => ({ icon: "phone" as IconName, text })),
   ].filter((d): d is { icon: IconName; text: string } => Boolean(d));
-  const subhead = withoutLogistics(copy.details, [day, date, time, price].filter((t): t is string => Boolean(t)));
+  // One or two clauses make a subhead; the rest become their own detail rows rather than
+  // a long line the layout would have to cut off with "…".
+  const clauses = withoutLogistics(copy.details, [day, date, time, price].filter((t): t is string => Boolean(t)))
+    .split("  ·  ")
+    .filter(Boolean);
+  const keep = clauses.length > 1 && clauses[0]!.length + clauses[1]!.length < 56 ? 2 : 1;
+  const subhead = clauses.slice(0, keep).join("  ·  ");
+  for (const clause of clauses.slice(keep)) {
+    if (details.length >= 4) break;
+    details.push({ icon: "check", text: clause });
+  }
   return {
     category,
     audience: "general public",
@@ -428,7 +441,31 @@ const DATE_WORDS =
  * logistics, numbers and proper nouns like venue or brand names, which make poor
  * searches), then a dependable query for the category.
  */
+/**
+ * What to photograph for common businesses, from what the owner says they sell — far
+ * better than the category default ("solar" should show panels, not a laptop).
+ */
+const SUBJECT_PHOTOS: [RegExp, string][] = [
+  [/\bsolar|inverter|load ?shedding\b/i, "solar panels being installed on a house roof"],
+  [/\b(cement|hardware|roofing|river sand|bricks|building materials)\b/i, "cement bags and building materials stacked at a hardware store"],
+  [/\bdriving (school|lessons)|learner driver|licen[cs]e classes\b/i, "learner driver at the wheel of a car with an instructor"],
+  [/\b(braids?|knotless|cornrows|wigs?)\b/i, "woman with long knotless braids, salon portrait"],
+  [/\b(barber|haircut)\b/i, "barber giving a man a fresh haircut"],
+  [/\b(nails?|manicure)\b/i, "manicured nails being painted at a nail salon"],
+  [/\b(chicks|broilers?|poultry|layers)\b/i, "day-old yellow chicks in a poultry house"],
+  [/\b(sadza|beef stew|takeaway|kitchen)\b/i, "plate of sadza with beef stew and greens"],
+  [/\b(pizza|pizzeria)\b/i, "freshly baked pizza on a wooden board"],
+  [/\b(phone|screen) repairs?|cracked screen\b/i, "technician repairing a smartphone screen at a workbench"],
+  [/\b(sugar|mealie meal|cooking oil|groceries|supermarket|grocery)\b/i, "supermarket shelves stocked with groceries"],
+  [/\b(crusade|revival|church|gospel|worship)\b/i, "large outdoor church gathering with people worshipping"],
+  [/\b(school|enrol|ecd|form [1-6]|academy)\b/i, "school children in uniform learning in a bright classroom"],
+  [/\b(clinic|pharmacy|doctor)\b/i, "friendly nurse with a patient at a clinic"],
+  [/\b(gym|fitness|workout)\b/i, "people training together in a gym"],
+];
+
 export function rulesPhotoQueries(prompt: string, category: Category): string[] {
+  const known = SUBJECT_PHOTOS.filter(([pattern]) => pattern.test(prompt)).map(([, subject]) => subject);
+  if (known.length) return [...new Set(known)].slice(0, 3);
   const words = prompt
     .replace(/[$€£]\s?\d+(?:[.,]\d+)?/g, " ")
     .split(/[^\p{L}\p{N}'&%–-]+/u)
