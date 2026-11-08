@@ -14,6 +14,7 @@ export const metadata: Metadata = { title: "Billing" };
 const REASON_LABELS: Record<string, string> = {
   generate: "Generation",
   export: "Export",
+  render: "Render",
   subscription: "Monthly credits",
   upgrade: "Plan upgrade",
   refund: "Refund",

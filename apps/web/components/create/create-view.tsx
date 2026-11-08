@@ -2,7 +2,7 @@
 
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import type Konva from "konva";
-import { ArrowRight, RotateCcw } from "lucide-react";
+import { ArrowRight, RotateCcw, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
 
@@ -15,11 +15,11 @@ import { useShell } from "@/components/shell/shell-provider";
 import { Button } from "@/components/ui/button";
 import { InlineMessage } from "@/components/ui/inline-message";
 import { ApiError, apiFetch } from "@/lib/api/client";
-import type { GenerateResponse, ProjectSummary } from "@flyer/core/api/contracts";
+import type { GenerateResponse, ProjectSummary, RenderResponse } from "@flyer/core/api/contracts";
 import type { FlyerFormat } from "@flyer/core/canvas/types";
 import { saveThumbnail } from "@/lib/canvas/thumbnail";
 import { fadeVariants, transitions } from "@/lib/motion";
-import { PLANS } from "@flyer/core/stripe/plans";
+import { CREDIT_COSTS, PLANS } from "@flyer/core/stripe/plans";
 import { formatCredits } from "@/lib/utils";
 
 const EXAMPLES = [
@@ -37,8 +37,13 @@ type Generation =
 function Result({ result, onReset, onRetry }: { result: GenerateResponse; onReset: () => void; onRetry: () => void }) {
   const router = useRouter();
   const { docs } = result;
+  const { setCredits } = useViewer();
   const [selected, setSelected] = useState(0);
   const [opening, setOpening] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  /** Variants rendered in this session: the first render is included, others cost credits. */
+  const [renderedCount, setRenderedCount] = useState(0);
+  const busy = opening || rendering;
   const [error, setError] = useState<string | null>(null);
   const pageRef = useRef<Konva.Group | null>(null);
   const thumbnailSaved = useRef(false);
@@ -78,6 +83,22 @@ function Result({ result, onReset, onRetry }: { result: GenerateResponse; onRese
     }
   }
 
+  /** Only the chosen design is rendered (Ideogram, from the engine's exact layout). */
+  async function renderAndOpen() {
+    setRendering(true);
+    setError(null);
+    try {
+      const rendered = await apiFetch<RenderResponse>(`/api/generate/${result.jobId}/render`, { method: "POST", json: { variant: selected } });
+      setRenderedCount((count) => count + 1);
+      if (rendered.charged > 0) setCredits(rendered.balance);
+      router.push(`/editor/${result.projectId}`);
+    } catch (caught) {
+      setRendering(false);
+      if (caught instanceof ApiError && typeof caught.details?.balance === "number") setCredits(caught.details.balance);
+      setError(caught instanceof ApiError ? caught.message : "Couldn't render this design. Open the editable version instead.");
+    }
+  }
+
   return (
     <ResultFrame
       result={result}
@@ -87,18 +108,38 @@ function Result({ result, onReset, onRetry }: { result: GenerateResponse; onRese
       actions={
         <div className="flex flex-col items-center gap-3">
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button size="lg" onClick={openInEditor} disabled={opening}>
-              {opening ? "Opening…" : "Open in editor"}
+            {result.renderable && (
+              <Button size="lg" onClick={renderAndOpen} disabled={busy}>
+                <Sparkles />
+                {rendering ? "Rendering… about 30s" : renderedCount > 0 ? `Render this one · ${CREDIT_COSTS.render} credits` : "Render & open"}
+              </Button>
+            )}
+            <Button size="lg" variant={result.renderable ? "secondary" : "primary"} onClick={openInEditor} disabled={busy}>
+              {opening ? "Opening…" : result.renderable ? "Open editable" : "Open in editor"}
               <ArrowRight />
             </Button>
-            <Button size="lg" variant="secondary" onClick={onRetry} disabled={opening}>
-              <RotateCcw />
-              Try again
+            {!result.renderable && (
+              <Button size="lg" variant="secondary" onClick={onRetry} disabled={busy}>
+                <RotateCcw />
+                Try again
+              </Button>
+            )}
+          </div>
+          {result.renderable && (
+            <p className="max-w-(--prose-max) text-center text-caption text-fg-secondary">
+              Rendering finishes the selected design as a polished graphic. Open editable keeps every element editable.
+            </p>
+          )}
+          <div className="flex items-center gap-4">
+            {result.renderable && (
+              <Button variant="plain" size="sm" onClick={onRetry} disabled={busy}>
+                Try again
+              </Button>
+            )}
+            <Button variant="plain" size="sm" onClick={onReset} disabled={busy}>
+              Start a new flyer
             </Button>
           </div>
-          <Button variant="plain" size="sm" onClick={onReset}>
-            Start a new flyer
-          </Button>
           <InlineMessage>{error}</InlineMessage>
         </div>
       }

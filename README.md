@@ -33,8 +33,10 @@ Optional:
 - **Renderer**: `IDEOGRAM_API_KEY`. The engine still designs every flyer (grid, spacing, hierarchy, palette,
   type, contrast); Ideogram 4.5 then renders that exact layout as a finished graphic from a compiled structured
   prompt — see `packages/core/src/design/render-prompt.ts` and `principles.ts`. Each variant falls back to its
-  editable engine design if rendering fails. Costs ~$0.10 per image at high quality (3 per generation;
-  `IDEOGRAM_QUALITY=medium` for ~$0.06). Try it with `pnpm render:try -- --fixture health`.
+  editable engine design if rendering fails. Generation returns the three editable designs quickly; only the
+  design the user picks is rendered (~$0.10 at high quality, `IDEOGRAM_QUALITY=medium` for ~$0.06). The first
+  render of a generation is included in its credits; rendering another design from it costs
+  `CREDIT_COSTS.render`. Try it with `pnpm render:try -- --fixture health`.
 - **Stripe (test mode)**: put `STRIPE_SECRET_KEY` (sk_test_…) and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (pk_test_…)
   in `.env`, then run `pnpm stripe:setup`. It creates the Pro and Max products, prices and a Customer Portal
   configuration and writes the IDs into `.env`. Then, next to `pnpm dev`, run `pnpm stripe:webhooks` to deliver

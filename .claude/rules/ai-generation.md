@@ -63,10 +63,14 @@ Never ask an image model to "make a flyer" from the user's prompt.
 - On when `IDEOGRAM_API_KEY` is set (`RENDERER=engine` turns it off). `render-prompt.ts` compiles a
   composed `FlyerDoc` into Ideogram's structured JSON prompt: every text node, shape, icon and photo
   frame becomes an element with an exact bbox (0–1000, `[y_min, x_min, y_max, x_max]`), its exact
-  words and its colour palette. `apps/api/src/render.ts` renders the three variants in parallel, copies
-  each image into R2 (renderer URLs expire) and delivers it as a locked full-page image node.
-- Each variant falls back to its editable engine design on any renderer failure or refusal; the
-  engine designs are always stored on `generation_jobs.variations.designs`.
+  words and its colour palette.
+- **Render only the chosen design.** `POST /api/generate` returns the three editable engine designs
+  (stored on `generation_jobs.variations.designs`); `POST /api/generate/:jobId/render` renders the one
+  the user picks (`apps/api/src/render.ts`), copies it into R2 (renderer URLs expire) and makes it the
+  project canvas as a locked full-page image node. The first render per generation is included;
+  others cost `CREDIT_COSTS.render` (refunded on failure); re-opening a rendered design is free.
+  Never render all variants up front — that triples the per-generation model cost.
+- A render failure or refusal leaves the editable design untouched and charges nothing.
 - Rules learned from testing — keep them (`pnpm test:render` checks each one offline):
   - Large empty regions must be declared as negative space **in the background prose by position**.
     Undeclared, the model fills them with invented copy (even words from the prompt); declared as

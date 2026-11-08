@@ -15,8 +15,8 @@ export interface GenerateResponse {
   source: "claude" | "open-model" | "rules";
   /** Unsplash download-tracking URLs for the photos placed in each design. */
   photoDownloads: string[][];
-  /** Per design: true when the renderer (Ideogram) finished it as a full-page graphic. */
-  rendered: boolean[];
+  /** True when the server can render a chosen design (POST /api/generate/:jobId/render). */
+  renderable: boolean;
   balance: number;
 }
 
@@ -102,4 +102,14 @@ export interface AuthConfig {
   configured: boolean;
   google: boolean;
   otpLength: number;
+}
+
+/** POST /api/generate/:jobId/render — one chosen design, finished by the renderer. */
+export interface RenderResponse {
+  /** The project's new canvas: the render as a locked full-page image. */
+  doc: FlyerDoc;
+  thumbnailUrl: string;
+  /** Credits charged for this render (0 when included or already rendered). */
+  charged: number;
+  balance: number;
 }

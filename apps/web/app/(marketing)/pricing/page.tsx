@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 
 const CREDIT_NOTES = [
   { label: "Generate", value: `${CREDIT_COSTS.generate} credits`, detail: "Three variations per prompt" },
+  { label: "Extra render", value: `${CREDIT_COSTS.render} credits`, detail: "First render of each generation included" },
   { label: "Export PNG", value: `${CREDIT_COSTS.export.png} credit`, detail: "Social-ready resolution" },
   { label: "Export 4K", value: `${CREDIT_COSTS.export["png-4k"]} credits`, detail: "Print-ready detail" },
 ];
@@ -25,7 +26,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/pricing"
 
       <PricingTable resume={typeof checkout === "string" ? checkout : undefined} />
 
-      <section aria-label="How credits work" className="grid gap-6 border-t border-separator pt-12 sm:grid-cols-3">
+      <section aria-label="How credits work" className="grid gap-6 border-t border-separator pt-12 sm:grid-cols-2 lg:grid-cols-4">
         {CREDIT_NOTES.map((note) => (
           <div key={note.label} className="flex flex-col gap-1">
             <span className="text-caption text-fg-secondary">{note.label}</span>

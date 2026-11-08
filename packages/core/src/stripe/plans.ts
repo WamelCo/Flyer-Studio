@@ -64,6 +64,11 @@ export const CREDIT_COSTS = {
   /** One generation run produces three variations. */
   generate: 5,
   export: { png: 1, pdf: 2, "png-2k": 2, "png-4k": 4 } satisfies Record<ExportFormatId, number>,
+  /**
+   * Rendering a design with the renderer (Ideogram). The first render of each generation
+   * is included in `generate`; rendering another design from the same generation costs this.
+   */
+  render: 5,
 } as const;
 
 /** Credits granted for one paid invoice. Annual invoices grant the full year up front. */

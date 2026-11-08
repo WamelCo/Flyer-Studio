@@ -1,13 +1,14 @@
 import type { FlyerDoc, FlyerFormat } from "@flyer/core/canvas/types";
-import { decorForVariant, rankedChoices, toDesignCopy } from "@flyer/core/design/brief";
-import { chooseVariants, composeDesign, hasRichCopy } from "@flyer/core/design/compose";
+import { decorForVariant, rankedChoices, toDesignCopy, type DesignBrief } from "@flyer/core/design/brief";
+import { chooseVariants, composeDesign, hasRichCopy, type Variant } from "@flyer/core/design/compose";
 import { directDesign } from "@flyer/core/design/director";
 import type { StockPhoto } from "@flyer/core/design/engine";
 import { PALETTES, withBrandColor } from "@flyer/core/design/palettes";
 import { photosForBrief } from "@flyer/core/design/photos";
+import type { RenderMeta } from "@flyer/core/design/render-prompt";
 import { PAIRINGS } from "@flyer/core/design/typography";
 
-import { renderingEnabled, renderVariants, type RenderedVariant, type StoreRender } from "./render";
+import { renderingEnabled, withoutPlaceholderPhotos } from "./render";
 
 export const VARIATIONS = 3;
 
@@ -16,11 +17,12 @@ const placeholderPhotos = (count: number): StockPhoto[] =>
   Array.from({ length: count }, (_, i) => ({ url: `render://photo/${i}`, width: 1600, height: 1200, credit: { name: "", url: "" } }));
 
 /**
- * Prompt → art direction (LLM) → stock photos (Unsplash) → three engine-composed designs →
- * optionally rendered (Ideogram) from those exact layouts. Pure of database and billing,
- * so the generate route and scripts/try-generate.mts run the same code.
+ * Prompt → art direction (LLM) → stock photos (Unsplash) → three engine-composed designs.
+ * Nothing is rendered here: the user picks a design and only that one is rendered
+ * (POST /api/generate/:jobId/render). Pure of database and billing, so the route and
+ * scripts/try-generate.mts run the same code.
  */
-export async function designFlyers(prompt: string, format: FlyerFormat, store: StoreRender) {
+export async function designFlyers(prompt: string, format: FlyerFormat) {
   const { brief, source, model } = await directDesign(prompt, format);
   const copy = toDesignCopy(brief);
   const choices = rankedChoices(brief);
@@ -35,7 +37,8 @@ export async function designFlyers(prompt: string, format: FlyerFormat, store: S
   });
 
   // The engine designs every variant: grid, spacing, hierarchy, palette, type, contrast.
-  const designs = variants.map((variant, i) =>
+  // `designs` keep their paintable frames for the renderer; `docs` are what the user edits.
+  const designs: FlyerDoc[] = variants.map((variant, i) =>
     composeDesign({
       format,
       copy,
@@ -45,24 +48,19 @@ export async function designFlyers(prompt: string, format: FlyerFormat, store: S
       brandColor: choices.brandColor,
     }),
   );
+  const docs = designs.map(withoutPlaceholderPhotos);
 
-  // The renderer finishes each design as a polished graphic, or each falls back (render.ts).
-  let renders: RenderedVariant[] | null = null;
-  if (rendering) {
-    renders = await renderVariants(
-      designs,
-      variants.map((variant) => ({
-        archetype: variant.archetype,
-        palette: withBrandColor(PALETTES[variant.palette], choices.brandColor),
-        pairing: PAIRINGS[variant.pairing],
-        subject: `${brief.category.replace("_", " ")} flyer for ${brief.audience}`,
-        tone: brief.tone,
-        photoPrompts: brief.photoQueries,
-      })),
-      store,
-    );
-  }
-  const docs: FlyerDoc[] = renders ? renders.map((render) => render.doc) : designs;
+  return { brief, source, model, copy, variants, designs, docs, photoSets, renderable: rendering };
+}
 
-  return { brief, source, model, copy, variants, designs, renders, docs, photoSets };
+/** The renderer's brief for one variant, rebuilt from what the job stored. */
+export function renderMeta(brief: DesignBrief, variant: Variant): RenderMeta {
+  return {
+    archetype: variant.archetype,
+    palette: withBrandColor(PALETTES[variant.palette], rankedChoices(brief).brandColor),
+    pairing: PAIRINGS[variant.pairing],
+    subject: `${brief.category.replace("_", " ")} flyer for ${brief.audience}`,
+    tone: brief.tone,
+    photoPrompts: brief.photoQueries,
+  };
 }
