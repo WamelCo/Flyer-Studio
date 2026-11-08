@@ -22,7 +22,9 @@
     "audit:contrast": "pnpm --filter @flyer/core audit:contrast",
     "stripe:setup": "pnpm --filter @flyer/api stripe:setup",
     "stripe:webhooks": "pnpm --filter @flyer/api stripe:webhooks",
-    "test:stripe": "pnpm --filter @flyer/api test:stripe"
+    "test:stripe": "pnpm --filter @flyer/api test:stripe",
+    "test:render": "pnpm --filter @flyer/core test:render",
+    "render:try": "pnpm --filter @flyer/core render:try"
   },
   "devDependencies": {
     "turbo": "^2.11.10",

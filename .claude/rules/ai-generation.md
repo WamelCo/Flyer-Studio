@@ -1,9 +1,11 @@
 # AI Generation Pipeline Rules
 
-Flyers are **designed, not generated as images**. A text LLM acts as art director and returns
+Flyers are **designed first, rendered second**. A text LLM acts as art director and returns
 decisions; the layout engine (`packages/core/src/design/`) executes them as editable canvas nodes —
-type, shapes, icons and photo frames — the way a graphic designer builds a layout.
-Do not add image-generation models.
+type, shapes, icons and photo frames — the way a graphic designer builds a layout. Optionally a
+renderer (Ideogram 4.5, see **Renderer** below) finishes that exact layout as a polished graphic.
+The image model never designs: it receives the engine's finished layout as a structured brief.
+Never ask an image model to "make a flyer" from the user's prompt.
 
 ## Prompt Handling
 1. Sanitize user input (length < 500 chars, strip malicious HTML) — `packages/core/src/ai/prompt.ts`.
@@ -50,3 +52,33 @@ Do not add image-generation models.
 ## Output
 - Generate 3 variations by default — three distinct design directions (layout × palette × type).
 - Store the brief and chosen variants on `generation_jobs.variations` (Prisma `GenerationJob.variations`); the first design becomes the project.
+
+## Design principles
+- One source of truth: `packages/core/src/design/principles.ts` — hierarchy, grid, spacing rhythm,
+  alignment, proximity, contrast, colour (60-30-10), typography, balance, whitespace, focal point,
+  shape language, consistency, imagery, legibility. Each states the designer's rule, how the engine
+  enforces it, a full directive and a short `cue` for prompts. Change principles there, not in prompts.
+
+## Renderer (Ideogram)
+- On when `IDEOGRAM_API_KEY` is set (`RENDERER=engine` turns it off). `render-prompt.ts` compiles a
+  composed `FlyerDoc` into Ideogram's structured JSON prompt: every text node, shape, icon and photo
+  frame becomes an element with an exact bbox (0–1000, `[y_min, x_min, y_max, x_max]`), its exact
+  words and its colour palette. `apps/api/src/render.ts` renders the three variants in parallel, copies
+  each image into R2 (renderer URLs expire) and delivers it as a locked full-page image node.
+- Each variant falls back to its editable engine design on any renderer failure or refusal; the
+  engine designs are always stored on `generation_jobs.variations.designs`.
+- Rules learned from testing — keep them (`pnpm test:render` checks each one offline):
+  - Large empty regions must be declared as negative space **in the background prose by position**.
+    Undeclared, the model fills them with invented copy (even words from the prompt); declared as
+    bbox elements, it draws outlined panels around them.
+  - A photo backdrop is the first element, full frame, "one single continuous photograph"; drop the
+    grid and imagery cues for that layout or the model builds a collage.
+  - Keep the style block to short cues. Long style sentences get rendered as text.
+  - Colours: hex only in `color_palette` fields, names in prose (hex in prose wastes the budget).
+  - Never drop text or structure (bullets, chips, icons) to fit the 10k-character budget; only decor
+    from `decor.ts` is expendable. Dropped structure gets replaced by invented elements.
+  - Generic text nodes get a role from their content (phone, email, URL, label-above) and small text
+    a position word — otherwise the model relocates them semantically.
+  - Photos inside frames: "no legible text, signs or logos" (otherwise garbled signage appears).
+- Iterate with `pnpm render:try -- --fixture <name>` or `--prompt "<text>" --variant 0|1|2` (add `--dry`
+  for a free price quote). Each real render costs ~$0.06 (medium) / ~$0.10 (high).

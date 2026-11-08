@@ -23,7 +23,8 @@ A production SaaS that generates flyers from a text prompt, lets users edit them
 - Better Auth (passwordless email code via Nodemailer/SMTP, optional Google) — server in `apps/api/src/auth.ts`, client in `apps/web/lib/auth/client.ts`
 - Cloudflare R2 for all files (S3 API, presigned PUT/GET) — `apps/api/src/r2.ts`. Public bucket for uploads/thumbnails, private bucket for exports.
 - Stripe (Subscriptions + Embedded Checkout + Webhooks)
-- A text LLM as art director + a layout engine (`packages/core/src/design/`) — no image generation. Claude (`@anthropic-ai/sdk`) when `ANTHROPIC_API_KEY` is set; otherwise an open-weight model (Qwen / GLM / DeepSeek) over an OpenAI-compatible API (`open-model.ts`)
+- A text LLM as art director + a layout engine (`packages/core/src/design/`) that designs every flyer. Claude (`@anthropic-ai/sdk`) when `ANTHROPIC_API_KEY` is set; otherwise an open-weight model (Qwen / GLM / DeepSeek) over an OpenAI-compatible API (`open-model.ts`)
+- Ideogram 4.5 as an optional **renderer** (`IDEOGRAM_API_KEY`): it finishes the engine's layout from a compiled structured prompt (`render-prompt.ts`); it never designs. Principles live in `design/principles.ts`
 - Unsplash (stock photography for photo frames)
 - Konva (`react-konva`) for the canvas editor
 - Framer Motion for ALL UI animation
@@ -52,6 +53,8 @@ pnpm test:stripe                 # Billing end to end in test mode (needs pnpm d
 pnpm test:director               # Art director against a mock OpenAI-compatible provider
 pnpm director:try "<prompt>"     # Try the configured art director on a real prompt
 pnpm audit:contrast              # WCAG contrast across every layout × palette × pairing × format
+pnpm test:render                 # Render-prompt compiler rules, offline (no API calls)
+pnpm render:try -- --fixture health [--dry]   # Render a fixture through Ideogram (costs ~$0.10)
 ```
 
 ---

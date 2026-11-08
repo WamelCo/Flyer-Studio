@@ -22,6 +22,11 @@ const nextConfig: NextConfig = {
       ? [{ protocol: r2Host.protocol.replace(":", "") as "http" | "https", hostname: r2Host.hostname, pathname: "/**" }]
       : [],
   },
+  experimental: {
+    // The rewrite proxy defaults to a 30s timeout; a generation (art director + three
+    // parallel renders) can take a couple of minutes.
+    proxyTimeout: 240_000,
+  },
   // The browser talks to the API on this origin, so Better Auth cookies are first-party.
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiUrl}/api/:path*` }];

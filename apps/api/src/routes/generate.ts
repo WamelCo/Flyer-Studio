@@ -1,11 +1,10 @@
 import { MAX_PROMPT_LENGTH, sanitizePrompt } from "@flyer/core/ai/prompt";
 import type { GenerateResponse } from "@flyer/core/api/contracts";
 import { ARCHETYPES } from "@flyer/core/design/archetypes";
-import { decorForVariant, rankedChoices, storedIntent, toDesignCopy } from "@flyer/core/design/brief";
-import { chooseVariants, composeDesign, hasRichCopy } from "@flyer/core/design/compose";
-import { DirectorRefusal, directDesign } from "@flyer/core/design/director";
+import { storedIntent } from "@flyer/core/design/brief";
+import { DirectorRefusal } from "@flyer/core/design/director";
 import { PALETTES } from "@flyer/core/design/palettes";
-import { photosForBrief, placedPhotos, trackDownloads } from "@flyer/core/design/photos";
+import { placedPhotos, trackDownloads } from "@flyer/core/design/photos";
 import { PAIRINGS } from "@flyer/core/design/typography";
 import { CREDIT_COSTS } from "@flyer/core/stripe/plans";
 import { addCredits, deductCredits, prisma, type Prisma } from "@flyer/db";
@@ -13,10 +12,10 @@ import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
+import { designFlyers } from "../design-pipeline";
 import { ApiException, parseJson, type AppEnv } from "../http";
+import { putObject, publicUrl } from "../r2";
 import { requireUser } from "../session";
-
-const VARIATIONS = 3;
 
 const Body = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_LENGTH * 2),
@@ -26,8 +25,8 @@ const Body = z.object({
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
 /**
- * Prompt → art direction (LLM) → stock photos (Unsplash) → three composed designs.
- * No image generation: every element is editable type, shape, icon or photo frame.
+ * Charges credits, runs the design pipeline (design-pipeline.ts: art direction → engine
+ * layouts → optional renderer), stores the job and the first design as the project.
  */
 export const generate = new Hono<AppEnv>().use(requireUser).post("/", async (c) => {
   const user = c.var.user;
@@ -49,28 +48,15 @@ export const generate = new Hono<AppEnv>().use(requireUser).post("/", async (c) 
   }
 
   try {
-    const { brief, source, model } = await directDesign(prompt, body.format);
-    const copy = toDesignCopy(brief);
-    const choices = rankedChoices(brief);
-    const photoSets = await photosForBrief(brief.photoQueries, body.format, VARIATIONS);
-    const variants = chooseVariants(choices, {
-      count: VARIATIONS,
-      hasPhotos: photoSets.every((set) => set.length > 0),
-      richCopy: hasRichCopy(copy),
+    const { brief, source, model, copy, variants, designs, renders, docs, photoSets } = await designFlyers(prompt, body.format, async (bytes, i) => {
+      const key = `${user.id}/renders/${jobId}-${i}.png`;
+      await putObject("public", key, bytes, "image/png");
+      return publicUrl(key);
     });
 
-    const docs = variants.map((variant, i) =>
-      composeDesign({
-        format: body.format,
-        copy,
-        variant,
-        photos: photoSets[i] ?? [],
-        decor: decorForVariant(choices.decor, i),
-        brandColor: choices.brandColor,
-      }),
-    );
     // Unsplash counts a photo as used when it lands in a design the user keeps. The first
     // direction becomes the project now; the client reports another one if it is opened.
+    // Rendered designs contain no stock photos, so they report none.
     const photoDownloads = docs.map((doc, i) => placedPhotos(doc, photoSets[i] ?? []).map((photo) => photo.downloadLocation));
     trackDownloads(photoDownloads[0]!.map((downloadLocation) => ({ downloadLocation })));
 
@@ -101,7 +87,18 @@ export const generate = new Hono<AppEnv>().use(requireUser).post("/", async (c) 
           status: "succeeded",
           projectId: created.id,
           completedAt: new Date(),
-          variations: json({ source, model, brief, variants, photos: photoSets.map((set) => set.map((p) => p.url)) }),
+          variations: json({
+            source,
+            model,
+            brief,
+            variants,
+            photos: photoSets.map((set) => set.map((p) => p.url)),
+            // The editable engine designs, kept when a render was delivered instead.
+            ...(renders && {
+              designs,
+              renders: renders.map(({ rendered, seed, error, prompt }) => ({ rendered, seed, error, prompt })),
+            }),
+          }),
         },
       });
       return created;
@@ -122,6 +119,7 @@ export const generate = new Hono<AppEnv>().use(requireUser).post("/", async (c) 
       rationale: brief.rationale,
       source,
       photoDownloads,
+      rendered: renders ? renders.map((render) => render.rendered) : docs.map(() => false),
       balance: charge.balance,
     };
     return c.json(response);

@@ -218,10 +218,27 @@ export function storedIntent(category: Category): "event" | "sale" | "real_estat
 
 // ── Rules fallback (no API key, or the director failed) ─────────────────────
 
+/**
+ * Contact details the user stated, lifted out before the prompt is split into clauses —
+ * the splitter breaks on "." and would turn "lotusyoga.com" into "Lotusyoga · Com".
+ */
+function extractContact(prompt: string) {
+  const email = prompt.match(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/)?.[0] ?? null;
+  const withoutEmail = email ? prompt.replace(email, " ") : prompt;
+  const website = withoutEmail.match(/\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[^\s,]*)?\b/i)?.[0] ?? null;
+  const phone = prompt.match(/(?:\+\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?\d{3}[\s.-]\d{3,4}(?:[\s.-]\d{3,4})?\b/)?.[0] ?? null;
+  let rest = prompt;
+  for (const value of [email, website, phone]) {
+    if (value) rest = rest.replace(new RegExp(`(?:,?\\s*(?:call|email|visit|at|on|or)\\s+)?${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"), " ");
+  }
+  return { email, website, phone, rest: rest.replace(/\s+([,.;])/g, "$1").replace(/[,\s]+$/, "").trim() };
+}
+
 export function rulesBrief(prompt: string): DesignBrief {
   const intent = classifyIntent(prompt);
   const category: Category = intent === "real_estate" ? "real_estate" : intent;
-  const copy = extractCopy(prompt, intent);
+  const contact = extractContact(prompt);
+  const copy = extractCopy(contact.rest || prompt, intent);
   const defaults = CATEGORY_DEFAULTS[category];
   const price = prompt.match(/[$€£]\s?\d+(?:[.,]\d{2})?/)?.[0];
   // A time or range: "8pm", "10:30am", "1–4pm", "10am - 6pm".
@@ -252,7 +269,7 @@ export function rulesBrief(prompt: string): DesignBrief {
       features: [],
       details,
       cta: CATEGORY_CTA[category],
-      contact: { phone: null, email: null, website: null, address: null, social: [] },
+      contact: { phone: contact.phone, email: contact.email, website: contact.website, address: null, social: [] },
     },
     layouts: defaults.layouts,
     palettes: defaults.palettes,
@@ -276,8 +293,11 @@ function withoutLogistics(line: string, tokens: string[]) {
     .split("·")
     .map((clause) => {
       let rest = clause;
-      for (const token of tokens) rest = rest.replace(token, " ");
+      for (const token of tokens) rest = rest.replace(token, " § ");
       if (rest === clause) return clause.trim();
+      // Connectives that pointed at a removed token go with it: "every Saturday at 7am" → "".
+      for (let pass = 0; pass < 3; pass++) rest = rest.replace(/\b(?:every|each|at|on|from|this|next|starting|starts|until)\s*(?=§)/gi, "");
+      rest = rest.replace(/§/g, " ");
       rest = rest.replace(/\s+/g, " ").replace(/^[\s,–-]+|[\s,–-]+$/g, "");
       if (!/\p{L}{2,}/u.test(rest.replace(LOGISTICS_FILLER, ""))) return "";
       return rest.charAt(0).toUpperCase() + rest.slice(1);

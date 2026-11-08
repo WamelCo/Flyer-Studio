@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "test:director": "tsx scripts/test-director.mts",
     "director:try": "tsx --env-file-if-exists=../../.env scripts/try-director.mts",
-    "audit:contrast": "tsx scripts/audit-contrast.mts"
+    "audit:contrast": "tsx scripts/audit-contrast.mts",
+    "render:try": "tsx --env-file-if-exists=../../.env scripts/try-render.mts",
+    "test:render": "tsx scripts/test-render.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

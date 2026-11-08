@@ -15,6 +15,8 @@ export interface GenerateResponse {
   source: "claude" | "open-model" | "rules";
   /** Unsplash download-tracking URLs for the photos placed in each design. */
   photoDownloads: string[][];
+  /** Per design: true when the renderer (Ideogram) finished it as a full-page graphic. */
+  rendered: boolean[];
   balance: number;
 }
 

@@ -22,6 +22,7 @@ export default function PlaygroundPage() {
     rationale: "Trust blue signals competence; an editorial serif gives the headline authority, while the circular portrait and ring arc keep it human.",
     source: "rules",
     photoDownloads: fixtures.map(() => []),
+    rendered: fixtures.map(() => false),
     balance: 3,
   };
   return <PlaygroundLoader result={result} />;

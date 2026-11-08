@@ -108,6 +108,13 @@ export async function headObject(name: BucketName, key: string) {
   }
 }
 
+/** Server-side upload (e.g. a rendered design copied from the renderer's expiring URL). */
+export async function putObject(name: BucketName, key: string, body: Uint8Array, contentType: string) {
+  await s3().send(
+    new PutObjectCommand({ Bucket: bucket(name), Key: key, Body: body, ContentType: contentType, CacheControl: "public, max-age=31536000, immutable" }),
+  );
+}
+
 export async function deleteObject(name: BucketName, key: string) {
   await s3().send(new DeleteObjectCommand({ Bucket: bucket(name), Key: key }));
 }
