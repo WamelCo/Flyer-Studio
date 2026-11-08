@@ -9,4 +9,4 @@
 - Use Stripe Checkout for upgrades. Use Customer Portal for management.
 - Webhooks MUST handle: `checkout.session.completed` (provision credits), `invoice.paid` (renew credits), `customer.subscription.deleted` (downgrade to Free).
 - **Credit Ledger:** Never mutate user credits directly in the UI. Always use a Postgres RPC (`deduct_credits`, `add_credits`) to prevent race conditions.
-- Price IDs must be mapped in `lib/stripe/plans.ts`. Do not hardcode price IDs in components.
+- Price IDs must be mapped in `packages/core/src/stripe/plans.ts`. Do not hardcode price IDs in components.

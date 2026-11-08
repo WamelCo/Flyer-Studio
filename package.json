@@ -1,63 +1,31 @@
 {
-  "name": "ai-flyer-generator",
-  "version": "0.1.0",
+  "name": "flyer-studio",
   "private": true,
   "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "typecheck": "next typegen && tsc --noEmit",
-    "test:db": "node --experimental-strip-types scripts/test-credits.mts",
-    "test:director": "tsx scripts/test-director.mts",
-    "test:stripe": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/test-stripe-webhooks.mts",
-    "director:try": "tsx --env-file=.env.local scripts/try-director.mts",
-    "audit:contrast": "tsx scripts/audit-contrast.mts",
-    "stripe:setup": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/stripe-setup.mts",
-    "stripe:webhooks": "node --env-file=.env.local scripts/stripe-webhooks.mts",
-    "supabase": "supabase",
-    "stripe": "stripe"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@tailwindcss/oxide",
-      "sharp",
-      "supabase",
-      "unrs-resolver"
-    ]
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^1.6.0",
-    "@stripe/react-stripe-js": "^7.0.1",
-    "@stripe/stripe-js": "^10.2.1",
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.119.0",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "framer-motion": "^14.9.1",
-    "konva": "^10.9.1",
-    "lucide-react": "^1.70.0",
-    "next": "^16.4.5",
-    "pdf-lib": "^1.17.1",
-    "radix-ui": "^1.8.1",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-konva": "^19.3.2",
-    "stripe": "^23.1.0",
-    "tailwind-merge": "^3.7.0",
-    "zod": "^4.6.7"
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @flyer/db db:generate",
+    "db:migrate": "pnpm --filter @flyer/db db:migrate",
+    "db:deploy": "pnpm --filter @flyer/db db:deploy",
+    "db:studio": "pnpm --filter @flyer/db db:studio",
+    "test:db": "pnpm --filter @flyer/db test:credits",
+    "test:db:concurrency": "pnpm --filter @flyer/db test:concurrency",
+    "test:director": "pnpm --filter @flyer/core test:director",
+    "director:try": "pnpm --filter @flyer/core director:try",
+    "audit:contrast": "pnpm --filter @flyer/core audit:contrast",
+    "stripe:setup": "pnpm --filter @flyer/api stripe:setup",
+    "stripe:webhooks": "pnpm --filter @flyer/api stripe:webhooks",
+    "test:stripe": "pnpm --filter @flyer/api test:stripe"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.15",
-    "@tailwindcss/postcss": "^4.3.4",
-    "@types/node": "^26.6.6",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "eslint": "^9.39.5",
-    "eslint-config-next": "^16.4.5",
-    "tailwindcss": "^4.3.4",
-    "tsx": "^4.23.15",
+    "turbo": "^2.11.10",
     "typescript": "^5.9.3"
   }
 }

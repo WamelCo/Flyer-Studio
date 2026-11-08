@@ -1,0 +1,33 @@
+{
+  "name": "@flyer/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:init-sql": "prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script --output prisma/migrations/20261108000000_init/migration.sql",
+    "typecheck": "tsc --noEmit",
+    "test:credits": "tsx scripts/test-credits.mts",
+    "test:concurrency": "tsx --env-file-if-exists=../../.env scripts/test-credits-concurrency.mts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "dotenv": "^18.0.9",
+    "prisma": "^7.10.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

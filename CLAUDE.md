@@ -9,30 +9,58 @@
 
 A production SaaS that generates flyers from a text prompt, lets users edit them on a canvas, and exports for print or social. Quality bar is Apple-level: clarity, deference, depth, consistency.
 
+**Monorepo (Turborepo + pnpm workspaces):**
+- `apps/web` — Next.js 16 (App Router) UI. Never touches the database or storage SDKs: Server Components call the API with `serverApi()` (`lib/api/server.ts`, forwards cookies); the browser calls `/api/*`, which `next.config.ts` rewrites to the API.
+- `apps/api` — Hono on Node. Owns the database, auth, R2, Stripe and generation. Every route lives under `/api`.
+- `packages/core` — framework-free shared code: design engine (`src/design`), canvas schema/types, plans (`src/stripe/plans.ts`), API contracts. TypeScript source, consumed directly (no build step).
+- `packages/db` — Prisma schema, migrations and client (`@flyer/db`), plus the credit wrappers.
+
 **Stack (mandatory, do not substitute):**
-- Next.js 14+ (App Router), TypeScript strict mode
-- Tailwind CSS + shadcn/ui
-- Supabase (Auth, Postgres, Storage)
+- TypeScript strict mode everywhere
+- Next.js 16 + Tailwind CSS + shadcn/ui (web)
+- Hono (API)
+- PostgreSQL + Prisma 7 (`prisma-client` generator, `@prisma/adapter-pg`)
+- Better Auth (passwordless email code via Nodemailer/SMTP, optional Google) — server in `apps/api/src/auth.ts`, client in `apps/web/lib/auth/client.ts`
+- Cloudflare R2 for all files (S3 API, presigned PUT/GET) — `apps/api/src/r2.ts`. Public bucket for uploads/thumbnails, private bucket for exports.
 - Stripe (Subscriptions + Embedded Checkout + Webhooks)
-- A text LLM as art director + a layout engine (`lib/design/`) — no image generation. Claude (`@anthropic-ai/sdk`) when `ANTHROPIC_API_KEY` is set; otherwise an open-weight model (Qwen / GLM / DeepSeek) over an OpenAI-compatible API (`lib/design/open-model.ts`)
+- A text LLM as art director + a layout engine (`packages/core/src/design/`) — no image generation. Claude (`@anthropic-ai/sdk`) when `ANTHROPIC_API_KEY` is set; otherwise an open-weight model (Qwen / GLM / DeepSeek) over an OpenAI-compatible API (`open-model.ts`)
 - Unsplash (stock photography for photo frames)
 - Konva (`react-konva`) for the canvas editor
 - Framer Motion for ALL UI animation
+
+**Never** reintroduce Supabase or another BaaS. Configuration is one root `.env` (see `.env.example`).
+`docker-compose.yml` + `Dockerfile` are for **production deployment only**; local development runs on the host.
 
 ---
 
 ## 2. Commands
 
 ```bash
-pnpm dev                         # Start dev server
+pnpm dev                         # API (:4000) + web (:3000) via turbo
 pnpm build                       # Production build — must pass before any phase is "done"
 pnpm lint                        # ESLint — must pass before any phase is "done"
-pnpm typecheck                   # tsc --noEmit
-pnpm supabase gen types typescript --local > lib/db/types.ts
-pnpm stripe listen --forward-to localhost:3000/api/webhooks/stripe
-pnpm stripe:setup                # Test mode: create products/prices/portal config, write IDs to .env.local
-pnpm stripe:webhooks [--replay]  # Forward test events to the dev server without the Stripe CLI
+pnpm typecheck                   # tsc --noEmit in every package
+pnpm db:migrate                  # prisma migrate dev (create/apply migrations locally)
+pnpm db:deploy                   # prisma migrate deploy
+pnpm db:generate                 # regenerate the Prisma client
+pnpm db:studio                   # Prisma Studio
+pnpm test:db                     # Credit SQL functions in PGlite (no server needed)
+pnpm test:db:concurrency         # Same, under real concurrency against DATABASE_URL
+pnpm stripe:setup                # Test mode: create products/prices/portal config, write IDs to .env
+pnpm stripe:webhooks [--replay]  # Forward test events to the local API without the Stripe CLI
 pnpm test:stripe                 # Billing end to end in test mode (needs pnpm dev running)
 pnpm test:director               # Art director against a mock OpenAI-compatible provider
 pnpm director:try "<prompt>"     # Try the configured art director on a real prompt
 pnpm audit:contrast              # WCAG contrast across every layout × palette × pairing × format
+```
+
+---
+
+## 3. Rules of the road
+
+- Credits move ONLY through the `deduct_credits` / `add_credits` SQL functions (`packages/db/src/credits.ts`).
+  They live in the `credit_functions` migration together with the check constraints Prisma can't model.
+- New API response shapes go in `packages/core/src/api/contracts.ts`; error codes in `api/types.ts`.
+- Schema changes: edit `packages/db/prisma/schema.prisma`, then `pnpm db:migrate --name <change>`.
+  Never hand-edit an applied migration.
+- Files never pass through the API: it issues presigned R2 URLs and the browser uploads directly.

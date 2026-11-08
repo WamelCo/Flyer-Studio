@@ -10,7 +10,7 @@
     {
       "name": "prod",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["start", "-p", "3001"],
+      "runtimeArgs": ["--filter", "@flyer/web", "start", "-p", "3001"],
       "port": 3001
     }
   ]

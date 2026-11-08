@@ -1,0 +1,229 @@
+// Flyer Studio — database schema (PostgreSQL).
+//
+//  * Better Auth owns user / session / account / verification.
+//  * Every user gets a profile (plan + credits) from a Better Auth database hook.
+//  * Credits change ONLY through the deduct_credits / add_credits SQL functions
+//    (see the init migration); every movement is an idempotent ledger row.
+//  * Check constraints and the credit functions live in the migration SQL — Prisma
+//    doesn't model them, and doesn't diff them either.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Better Auth ──────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id
+  name          String    @default("")
+  email         String    @unique
+  emailVerified Boolean   @default(false) @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions      Session[]
+  accounts      Account[]
+  profile       Profile?
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  token     String   @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz(6)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(6)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ── Billing ──────────────────────────────────────────────────────────────────
+
+enum PlanTier {
+  free
+  pro
+  max
+
+  @@map("plan_tier")
+}
+
+enum BillingInterval {
+  month
+  year
+
+  @@map("billing_interval")
+}
+
+model Profile {
+  id                   String           @id
+  user                 User             @relation(fields: [id], references: [id], onDelete: Cascade)
+  email                String           @default("")
+  plan                 PlanTier         @default(free)
+  /// Never write this directly — use deduct_credits / add_credits.
+  credits              Int              @default(0)
+  stripeCustomerId     String?          @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?          @unique @map("stripe_subscription_id")
+  billingInterval      BillingInterval? @map("billing_interval")
+  currentPeriodEnd     DateTime?        @map("current_period_end") @db.Timestamptz(6)
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ledger         CreditLedger[]
+  projects       FlyerProject[]
+  generationJobs GenerationJob[]
+  generationLogs AiGenerationLog[]
+  exports        FlyerExport[]
+
+  @@map("profiles")
+}
+
+model CreditLedger {
+  id             BigInt   @id @default(autoincrement())
+  userId         String   @map("user_id")
+  profile        Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta          Int
+  balanceAfter   Int      @map("balance_after")
+  reason         String
+  idempotencyKey String   @unique @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("credit_ledger")
+}
+
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@map("stripe_events")
+}
+
+// ── Projects & generation ────────────────────────────────────────────────────
+
+model FlyerProject {
+  id           String         @id @default(uuid()) @db.Uuid
+  userId       String         @map("user_id")
+  profile      Profile        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String         @default("Untitled flyer")
+  /// poster | square | story | landscape
+  format       String
+  canvas       Json
+  thumbnailUrl String?        @map("thumbnail_url")
+  generationId String?        @map("generation_id") @db.Uuid
+  generation   GenerationJob? @relation("ProjectGeneration", fields: [generationId], references: [id], onDelete: SetNull)
+  revision     Int            @default(0)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  jobsProducing GenerationJob[] @relation("JobProject")
+  exports       FlyerExport[]
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("flyer_projects")
+}
+
+model GenerationJob {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id")
+  profile      Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompt       String
+  /// event | sale | real_estate | party
+  intent       String
+  format       String
+  /// pending | succeeded | failed
+  status       String    @default("pending")
+  variations   Json      @default("[]")
+  projectId    String?   @map("project_id") @db.Uuid
+  project      FlyerProject? @relation("JobProject", fields: [projectId], references: [id], onDelete: SetNull)
+  creditsSpent Int       @default(0) @map("credits_spent")
+  errorCode    String?   @map("error_code")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  projects FlyerProject[]    @relation("ProjectGeneration")
+  logs     AiGenerationLog[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("generation_jobs")
+}
+
+model AiGenerationLog {
+  id        BigInt         @id @default(autoincrement())
+  userId    String?        @map("user_id")
+  profile   Profile?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  jobId     String?        @map("job_id") @db.Uuid
+  job       GenerationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  prompt    String?
+  errorCode String         @map("error_code")
+  message   String?
+  details   Json?
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("ai_generation_logs")
+}
+
+model FlyerExport {
+  /// Client-generated so retries are idempotent.
+  id           String       @id @db.Uuid
+  userId       String       @map("user_id")
+  profile      Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId    String       @map("project_id") @db.Uuid
+  project      FlyerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// png | pdf | png-2k | png-4k
+  format       String
+  creditsSpent Int          @map("credits_spent")
+  watermarked  Boolean
+  /// pending | complete | failed
+  status       String       @default("pending")
+  /// Object key in the private exports bucket.
+  storagePath  String       @map("storage_path")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt  DateTime?    @map("completed_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("exports")
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@flyer/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared, framework-free code: design engine, canvas schema, plans and API contracts.",
+  "exports": {
+    "./design/icons.json": "./src/design/icons.json",
+    "./design/metrics.json": "./src/design/metrics.json",
+    "./design/archetypes": "./src/design/archetypes/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:director": "tsx scripts/test-director.mts",
+    "director:try": "tsx --env-file-if-exists=../../.env scripts/try-director.mts",
+    "audit:contrast": "tsx scripts/audit-contrast.mts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

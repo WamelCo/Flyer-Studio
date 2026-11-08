@@ -1,0 +1,41 @@
+{
+  "name": "@flyer/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false --env-file-if-exists=../../.env src/index.ts",
+    "build": "tsup",
+    "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "stripe:setup": "tsx --env-file-if-exists=../../.env scripts/stripe-setup.mts",
+    "stripe:webhooks": "tsx --env-file-if-exists=../../.env scripts/stripe-webhooks.mts",
+    "test:stripe": "tsx --env-file-if-exists=../../.env scripts/test-stripe-webhooks.mts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@aws-sdk/client-s3": "^3.1164.0",
+    "@aws-sdk/s3-request-presigner": "^3.1164.0",
+    "@flyer/core": "workspace:*",
+    "@flyer/db": "workspace:*",
+    "@hono/node-server": "^2.1.6",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "better-auth": "^1.7.18",
+    "hono": "^4.13.17",
+    "nodemailer": "^10.4.0",
+    "pg": "^8.23.1",
+    "stripe": "^23.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/nodemailer": "^8.0.2",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

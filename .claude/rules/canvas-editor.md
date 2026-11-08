@@ -8,7 +8,7 @@
 - Inline text editing (double-click).
 - Layer panel (z-index reordering).
 - Undo/Redo (history stack, max 20 steps).
-- Export current canvas state as JSON to Supabase (`flyer_projects` table).
+- Export current canvas state as JSON to the API (`PATCH /api/projects/:id` → Postgres `flyer_projects` table).
 
 ## Persistence
 - Auto-save every 30 seconds. Use debounced saves. Do not save on every pixel movement.

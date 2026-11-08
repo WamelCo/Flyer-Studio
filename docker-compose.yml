@@ -1,0 +1,81 @@
+# Production deployment of every service. Not used for local development.
+#
+#   cp .env.example .env      # fill in production values
+#   docker compose up -d --build
+#
+# Only `web` is published (port 3000) — put your TLS reverse proxy (Caddy, nginx,
+# Traefik, a load balancer…) in front of it. The browser reaches the API through
+# web's /api rewrite, so the API and Postgres stay on the private network.
+# Point Stripe's webhook at https://<your domain>/api/webhooks/stripe.
+
+name: flyer-studio
+
+x-build: &build
+  context: .
+  # Same args for every target so the shared builder stage is built once.
+  args:
+    NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?set NEXT_PUBLIC_SITE_URL in .env}
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+    R2_PUBLIC_URL: ${R2_PUBLIC_URL:?set R2_PUBLIC_URL in .env}
+    API_INTERNAL_URL: http://api:4000
+
+x-database-url: &database-url postgresql://${POSTGRES_USER:-flyer}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-flyer}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-flyer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-flyer}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      <<: *build
+      target: migrate
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      <<: *build
+      target: api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: *database-url
+      WEB_URL: ${NEXT_PUBLIC_SITE_URL}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      <<: *build
+      target: web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_URL: http://api:4000
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
