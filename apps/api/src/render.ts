@@ -1,5 +1,5 @@
 import type { FlyerDoc, ImageNode } from "@flyer/core/canvas/types";
-import { ideogramConfigured, IdeogramError, renderFlyer, type RenderQuality } from "@flyer/core/design/ideogram";
+import { checkRender, ideogramConfigured, IdeogramError, renderFlyer, startRender, type RenderQuality } from "@flyer/core/design/ideogram";
 import { compileRenderPrompt, type IdeogramPrompt, type RenderMeta } from "@flyer/core/design/render-prompt";
 
 /*
@@ -63,8 +63,8 @@ export async function renderVariants(
   store: StoreRender,
   options: { timeoutMs?: number } = {},
 ): Promise<RenderedVariant[]> {
-  // Ideogram usually answers in 15–90s but has slow spells; the web proxy allows 240s.
-  const timeoutMs = options.timeoutMs ?? 180_000;
+  // Renders are polled, so a slow spell is only a longer wait; this is the overall deadline.
+  const timeoutMs = options.timeoutMs ?? 6 * 60_000;
   return Promise.all(
     docs.map(async (doc, index): Promise<RenderedVariant> => {
       const fallback = withoutPlaceholderPhotos(doc);
@@ -85,4 +85,33 @@ export async function renderVariants(
       }
     }),
   );
+}
+
+// ── Across HTTP requests (POST starts, GET polls) ──────────────────────────────
+
+/** Starts rendering one engine design; returns Ideogram's generation id. */
+export async function startDesignRender(design: FlyerDoc, meta: RenderMeta) {
+  const prompt = compileRenderPrompt(design, meta);
+  const generationId = await startRender(prompt, design.format, { quality: renderQuality() });
+  return { generationId, prompt };
+}
+
+export type CollectedRender =
+  | { status: "pending" }
+  | { status: "done"; url: string; seed: number }
+  | { status: "failed"; reason: string };
+
+/**
+ * One poll of a started render. When it has finished, the image is copied into storage
+ * straight away (renderer URLs expire) and its stored URL returned.
+ */
+export async function collectRender(generationId: string, store: (bytes: Uint8Array) => Promise<string>): Promise<CollectedRender> {
+  const check = await checkRender(generationId, { signal: AbortSignal.timeout(20_000) }).catch(() => ({ status: "pending" }) as const);
+  if (check.status === "pending") return check;
+  if (check.status === "failed") return { status: "failed", reason: check.reason };
+  const image = check.images[0]!;
+  const response = await fetch(image.url, { signal: AbortSignal.timeout(60_000) });
+  if (!response.ok) return { status: "pending" }; // transient: the next poll tries again
+  const url = await store(new Uint8Array(await response.arrayBuffer()));
+  return { status: "done", url, seed: image.seed };
 }

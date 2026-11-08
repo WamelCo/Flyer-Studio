@@ -5,9 +5,14 @@ import { RENDER_SIZES, type IdeogramPrompt } from "./render-prompt";
  * Ideogram API v2 (https://developer.ideogram.ai/v2/llms.txt). Renders a compiled
  * structured prompt (render-prompt.ts) with Ideogram 4.5. Server-side only: the key
  * never leaves the API. Image URLs expire, so callers must copy results to storage.
+ *
+ * Renders always run asynchronously: startRender() returns a generation id at once and
+ * checkRender() polls it. Ideogram takes 15–130s per image and has slow spells, so no
+ * request ever has to stay open for a render.
  */
 
-const API = "https://api.ideogram.ai";
+/** Overridable for tests (a local mock of the API). */
+const API = (process.env.IDEOGRAM_BASE_URL || "https://api.ideogram.ai").replace(/\/$/, "");
 
 /**
  * Ideogram 4.5 bills by quality, not size: low $0.03, medium $0.06, high $0.10 per image
@@ -22,6 +27,11 @@ export interface RenderResult {
   width: number;
   height: number;
 }
+
+export type RenderCheck =
+  | { status: "pending" }
+  | { status: "completed"; images: RenderResult[] }
+  | { status: "failed"; reason: string; blocked: boolean };
 
 export class IdeogramError extends Error {
   constructor(
@@ -38,19 +48,28 @@ export function ideogramConfigured() {
   return Boolean(process.env.IDEOGRAM_API_KEY);
 }
 
+function apiKey() {
+  const key = process.env.IDEOGRAM_API_KEY;
+  if (!key) throw new IdeogramError("IDEOGRAM_API_KEY is not set", 503);
+  return key;
+}
+
 function renderModel() {
   return process.env.IDEOGRAM_MODEL || "ideogram-4-5";
 }
 
-/** Renders `count` images of one structured prompt. Throws IdeogramError on any failure. */
-export async function renderFlyer(
+async function errorFrom(response: Response) {
+  const body = (await response.json().catch(() => null)) as { error?: string; detail?: string } | null;
+  return new IdeogramError(body?.error ?? body?.detail ?? `Ideogram returned ${response.status}`, response.status, response.status === 422);
+}
+
+/** Starts one render and returns its generation id. Throws IdeogramError if not accepted. */
+export async function startRender(
   prompt: IdeogramPrompt,
   format: FlyerFormat,
-  options: { count?: number; quality?: RenderQuality; seed?: number; signal?: AbortSignal } = {},
-): Promise<RenderResult[]> {
-  const key = process.env.IDEOGRAM_API_KEY;
-  if (!key) throw new IdeogramError("IDEOGRAM_API_KEY is not set", 503);
-
+  options: { quality?: RenderQuality; seed?: number; signal?: AbortSignal } = {},
+): Promise<string> {
+  const key = apiKey();
   const size = RENDER_SIZES[format];
   const model = renderModel();
   const promptText = JSON.stringify(prompt);
@@ -66,7 +85,7 @@ export async function renderFlyer(
         magic_prompt: "off",
         resolution: `${size.width}x${size.height}`,
         rendering_speed: options.quality === "high" ? "quality" : options.quality === "medium" ? "default" : "turbo",
-        num_images: options.count ?? 1,
+        async: true,
         ...(options.seed !== undefined && { seed: options.seed }),
       }),
       signal: options.signal,
@@ -79,25 +98,76 @@ export async function renderFlyer(
     form.append("size", `${size.width}x${size.height}`);
     form.append("quality", options.quality ?? "low");
     form.append("background", "opaque");
-    form.append("num_images", String(options.count ?? 1));
+    form.append("async", "true");
     if (options.seed !== undefined) form.append("seed", String(options.seed));
     response = await fetch(`${API}/v2/image/generate/${model}`, { method: "POST", headers: { "Api-Key": key }, body: form, signal: options.signal });
   }
 
-  const body = (await response.json().catch(() => null)) as
-    | { data?: { url?: string | null; seed: number; resolution: string; is_image_safe: boolean }[]; error?: string; detail?: string }
-    | null;
+  if (!response.ok) throw await errorFrom(response);
+  const body = (await response.json().catch(() => null)) as { generation_id?: string } | null;
+  if (!body?.generation_id) throw new IdeogramError("Ideogram accepted the render but returned no generation id", 502);
+  return body.generation_id;
+}
 
+/** One poll of a render. Network or rate-limit trouble reads as still pending. */
+export async function checkRender(generationId: string, options: { signal?: AbortSignal } = {}): Promise<RenderCheck> {
+  let response: Response;
+  try {
+    response = await fetch(`${API}/v2/generations/${encodeURIComponent(generationId)}`, { headers: { "Api-Key": apiKey() }, signal: options.signal });
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    return { status: "pending" };
+  }
+  if (response.status === 429 || response.status >= 500) return { status: "pending" };
   if (!response.ok) {
-    const message = body?.error ?? body?.detail ?? `Ideogram returned ${response.status}`;
-    throw new IdeogramError(message, response.status, response.status === 422);
+    const error = await errorFrom(response);
+    return { status: "failed", reason: error.message, blocked: false };
   }
 
-  const images = (body?.data ?? []).filter((image) => image.is_image_safe && image.url);
-  if (images.length === 0) throw new IdeogramError("Ideogram returned no safe images", 422, true);
+  const body = (await response.json()) as {
+    status: "pending" | "completed" | "failed";
+    failure_reason?: string;
+    data?: { url?: string | null; seed?: number; resolution?: string; is_image_safe?: boolean }[];
+  };
+  if (body.status === "pending") return { status: "pending" };
+  if (body.status === "failed") {
+    const reason = body.failure_reason ?? "failed";
+    return { status: "failed", reason, blocked: /policy|safety|unsafe/i.test(reason) };
+  }
 
-  return images.map((image) => {
-    const [width, height] = image.resolution.split("x").map(Number);
-    return { url: image.url!, seed: image.seed, width: width ?? size.width, height: height ?? size.height };
+  const images = (body.data ?? [])
+    .filter((image) => image.is_image_safe !== false && image.url)
+    .map((image) => {
+      const [width, height] = (image.resolution ?? "").split("x").map(Number);
+      return { url: image.url!, seed: image.seed ?? 0, width: width || 0, height: height || 0 };
+    });
+  if (images.length === 0) return { status: "failed", reason: "no safe image returned", blocked: true };
+  return { status: "completed", images };
+}
+
+const pause = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    });
   });
+
+/**
+ * Starts a render and polls until it finishes (for scripts and other long-lived callers;
+ * the API's HTTP routes use startRender/checkRender across requests instead).
+ */
+export async function renderFlyer(
+  prompt: IdeogramPrompt,
+  format: FlyerFormat,
+  options: { quality?: RenderQuality; seed?: number; signal?: AbortSignal; pollMs?: number } = {},
+): Promise<RenderResult[]> {
+  const generationId = await startRender(prompt, format, options);
+  for (;;) {
+    await pause(options.pollMs ?? (Number(process.env.IDEOGRAM_POLL_MS) || 3_000), options.signal);
+    const check = await checkRender(generationId, { signal: options.signal });
+    if (check.status === "completed") return check.images;
+    if (check.status === "failed") throw new IdeogramError(`Render failed: ${check.reason}`, 502, check.blocked);
+  }
 }

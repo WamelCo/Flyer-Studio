@@ -15,7 +15,7 @@ import { useShell } from "@/components/shell/shell-provider";
 import { Button } from "@/components/ui/button";
 import { InlineMessage } from "@/components/ui/inline-message";
 import { ApiError, apiFetch } from "@/lib/api/client";
-import type { GenerateResponse, ProjectSummary, RenderResponse } from "@flyer/core/api/contracts";
+import type { GenerateResponse, ProjectSummary, RenderStatus } from "@flyer/core/api/contracts";
 import type { FlyerFormat } from "@flyer/core/canvas/types";
 import { saveThumbnail } from "@/lib/canvas/thumbnail";
 import { fadeVariants, transitions } from "@/lib/motion";
@@ -27,6 +27,10 @@ const EXAMPLES = [
   "50% off everything this weekend at Juniper & Co.",
   "Open house Sunday 1–4pm, 3 bed modern home on Maple Street",
 ];
+
+/** How often to poll a render, and how long to wait before suggesting the editable version. */
+const RENDER_POLL_MS = 3_000;
+const RENDER_WAIT_MS = 8 * 60_000;
 
 type Generation =
   | { status: "idle" }
@@ -41,6 +45,8 @@ function Result({ result, onReset, onRetry }: { result: GenerateResponse; onRese
   const [selected, setSelected] = useState(0);
   const [opening, setOpening] = useState(false);
   const [rendering, setRendering] = useState(false);
+  /** Seconds since the render started, shown on the button. */
+  const [elapsed, setElapsed] = useState(0);
   /** Variants rendered in this session: the first render is included, others cost credits. */
   const [renderedCount, setRenderedCount] = useState(0);
   const busy = opening || rendering;
@@ -83,19 +89,36 @@ function Result({ result, onReset, onRetry }: { result: GenerateResponse; onRese
     }
   }
 
-  /** Only the chosen design is rendered (Ideogram, from the engine's exact layout). */
+  /**
+   * Only the chosen design is rendered (Ideogram, from the engine's exact layout). The
+   * server starts the render and answers at once; this polls until it's done, so a slow
+   * renderer means a longer wait, never a timed-out request.
+   */
   async function renderAndOpen() {
     setRendering(true);
+    setElapsed(0);
     setError(null);
+    const started = Date.now();
+    const tick = window.setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     try {
-      const rendered = await apiFetch<RenderResponse>(`/api/generate/${result.jobId}/render`, { method: "POST", json: { variant: selected } });
+      const variant = selected;
+      let status = await apiFetch<RenderStatus>(`/api/generate/${result.jobId}/render`, { method: "POST", json: { variant } });
+      if (status.charged > 0) setCredits(status.balance);
+      while (status.status === "pending") {
+        if (Date.now() - started > RENDER_WAIT_MS) {
+          throw new ApiError("GENERATION_TIMEOUT", "Rendering is taking unusually long. Open the editable version, or try again in a minute.", 504);
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, RENDER_POLL_MS));
+        status = await apiFetch<RenderStatus>(`/api/generate/${result.jobId}/render/${variant}`);
+      }
       setRenderedCount((count) => count + 1);
-      if (rendered.charged > 0) setCredits(rendered.balance);
       router.push(`/editor/${result.projectId}`);
     } catch (caught) {
       setRendering(false);
       if (caught instanceof ApiError && typeof caught.details?.balance === "number") setCredits(caught.details.balance);
       setError(caught instanceof ApiError ? caught.message : "Couldn't render this design. Open the editable version instead.");
+    } finally {
+      window.clearInterval(tick);
     }
   }
 
@@ -111,7 +134,7 @@ function Result({ result, onReset, onRetry }: { result: GenerateResponse; onRese
             {result.renderable && (
               <Button size="lg" onClick={renderAndOpen} disabled={busy}>
                 <Sparkles />
-                {rendering ? "Rendering… about 30s" : renderedCount > 0 ? `Render this one · ${CREDIT_COSTS.render} credits` : "Render & open"}
+                {rendering ? `Rendering… ${elapsed}s` : renderedCount > 0 ? `Render this one · ${CREDIT_COSTS.render} credits` : "Render & open"}
               </Button>
             )}
             <Button size="lg" variant={result.renderable ? "secondary" : "primary"} onClick={openInEditor} disabled={busy}>

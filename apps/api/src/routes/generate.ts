@@ -1,5 +1,5 @@
 import { MAX_PROMPT_LENGTH, sanitizePrompt } from "@flyer/core/ai/prompt";
-import type { GenerateResponse, RenderResponse } from "@flyer/core/api/contracts";
+import type { GenerateResponse, RenderStatus } from "@flyer/core/api/contracts";
 import type { FlyerDoc } from "@flyer/core/canvas/types";
 import { ARCHETYPES } from "@flyer/core/design/archetypes";
 import { storedIntent, type DesignBrief } from "@flyer/core/design/brief";
@@ -17,7 +17,7 @@ import { z } from "zod";
 import { designFlyers, renderMeta, VARIATIONS } from "../design-pipeline";
 import { ApiException, parseJson, uuidParam, type AppEnv } from "../http";
 import { putObject, publicUrl } from "../r2";
-import { renderedDoc, renderingEnabled, renderVariants } from "../render";
+import { collectRender, renderedDoc, renderingEnabled, startDesignRender } from "../render";
 import { requireUser } from "../session";
 
 const Body = z.object({
@@ -38,8 +38,23 @@ interface StoredVariations {
   photos: string[][];
   /** The engine designs, with paintable frames — the renderer's input. */
   designs?: FlyerDoc[];
-  /** Renders delivered so far, by variant index. */
-  renders?: Record<string, { url: string; seed?: number; at: string }>;
+  /** Renders by variant index: started, delivered or failed. */
+  renders?: Record<string, StoredRender>;
+}
+
+/** One design's render, tracked across the start and poll requests. */
+interface StoredRender {
+  status: "pending" | "done" | "failed";
+  /** Ideogram's generation id, polled until the render finishes. */
+  generationId?: string;
+  url?: string;
+  seed?: number;
+  /** Credits charged for this render (0 when it was the included one). */
+  charged: number;
+  /** The ledger key it was charged under, so a refund is idempotent. */
+  chargeKey?: string;
+  startedAt: string;
+  error?: string;
 }
 
 export const generate = new Hono<AppEnv>()
@@ -127,10 +142,10 @@ export const generate = new Hono<AppEnv>()
   })
 
   /**
-   * Renders the one design the user chose (Ideogram, from the engine's exact layout) and
-   * makes it the project's canvas. The first render of a generation is included in its
-   * generate charge; rendering another design from it costs CREDIT_COSTS.render.
-   * Re-opening a design that was already rendered is free and calls no model.
+   * Starts rendering the one design the user chose (Ideogram, from the engine's exact
+   * layout). Returns at once with "pending" — the client polls the GET below — or "done"
+   * when this design was already rendered. The first render of a generation is included
+   * in its generate charge; rendering another design from it costs CREDIT_COSTS.render.
    */
   .post("/:jobId/render", async (c) => {
     const user = c.var.user;
@@ -138,36 +153,25 @@ export const generate = new Hono<AppEnv>()
     const { variant } = await parseJson(c, RenderBody);
     if (!renderingEnabled()) throw new ApiException("AI_NOT_CONFIGURED", "Rendering isn't set up on this server.");
 
-    const job = await prisma.generationJob.findFirst({ where: { id: jobId, userId: user.id }, select: { variations: true, projectId: true, prompt: true } });
-    if (!job?.projectId) throw new ApiException("NOT_FOUND", "We couldn't find that generation.");
-    const stored = job.variations as unknown as StoredVariations;
-    const design = stored.designs?.[variant];
-    const chosen = stored.variants?.[variant];
+    const job = await loadJob(jobId, user.id);
+    const design = job.stored.designs?.[variant];
+    const chosen = job.stored.variants?.[variant];
     if (!design || !chosen) throw new ApiException("NOT_FOUND", "That design isn't available to render.");
-    const projectId = job.projectId;
 
-    const deliver = async (url: string, charged: number, balance: number, renders: StoredVariations["renders"]) => {
-      const doc = renderedDoc(design, url);
-      await prisma.$transaction([
-        prisma.flyerProject.update({
-          where: { id: projectId, userId: user.id },
-          data: { canvas: json(doc), thumbnailUrl: url, revision: { increment: 1 } },
-        }),
-        prisma.generationJob.update({ where: { id: jobId }, data: { variations: json({ ...stored, renders }) } }),
-      ]);
-      const response: RenderResponse = { doc, thumbnailUrl: url, charged, balance };
-      return c.json(response);
-    };
+    const existing = job.stored.renders?.[String(variant)];
+    if (existing?.status === "done") return c.json(await doneStatus(job, variant, existing, user.id));
+    if (existing?.status === "pending" && !stale(existing)) {
+      const pending: RenderStatus = { status: "pending", startedAt: existing.startedAt, charged: existing.charged, balance: await getBalance(user.id) };
+      return c.json(pending, 202);
+    }
 
-    // Already rendered: deliver it again, no charge, no model call.
-    const existing = stored.renders?.[String(variant)];
-    if (existing) return deliver(existing.url, 0, await getBalance(user.id), stored.renders);
-
-    // The first render of a generation is included. (Two different designs rendered at the
-    // same instant could both count as the first — the UI renders one at a time.)
-    const included = Object.keys(stored.renders ?? {}).length === 0;
-    const cost = included ? 0 : CREDIT_COSTS.render;
-    const chargeKey = `render:${user.id}:${jobId}:${variant}`;
+    // The first render is included; failed renders were refunded and don't count.
+    // (Two designs started at the same instant could both count as the first — the UI
+    // renders one at a time.)
+    const used = Object.values(job.stored.renders ?? {}).filter((r) => r.status === "done" || r.status === "pending").length;
+    const cost = used === 0 ? 0 : CREDIT_COSTS.render;
+    const startedAt = new Date().toISOString();
+    const chargeKey = `render:${user.id}:${jobId}:${variant}:${startedAt}`;
     let balance = await getBalance(user.id);
     if (cost > 0) {
       const charge = await deductCredits({ userId: user.id, amount: cost, reason: "render", idempotencyKey: chargeKey });
@@ -180,20 +184,104 @@ export const generate = new Hono<AppEnv>()
       balance = charge.balance;
     }
 
-    const [result] = await renderVariants([design], [renderMeta(stored.brief, chosen)], async (bytes) => {
+    let generationId: string;
+    try {
+      ({ generationId } = await startDesignRender(design, renderMeta(job.stored.brief, chosen)));
+    } catch (error) {
+      if (cost > 0) balance = await addCredits({ userId: user.id, amount: cost, reason: "refund:render", idempotencyKey: `refund:${chargeKey}` });
+      await logRenderFailure(user.id, jobId, job.prompt, variant, error instanceof Error ? error.message : String(error));
+      throw new ApiException("GENERATION_FAILED", "We couldn't start rendering this design. Open the editable version instead — nothing was charged.", { balance });
+    }
+
+    await saveRender(jobId, job.stored, variant, { status: "pending", generationId, charged: cost, chargeKey, startedAt });
+    const pending: RenderStatus = { status: "pending", startedAt, charged: cost, balance };
+    return c.json(pending, 202);
+  })
+
+  /**
+   * Polls a render started above. Each poll asks the renderer; the first poll that sees
+   * it finished stores the image in R2 and makes it the project's canvas. Stateless, so
+   * restarts and multiple API instances are fine.
+   */
+  .get("/:jobId/render/:variant", async (c) => {
+    const user = c.var.user;
+    const jobId = uuidParam(c.req.param("jobId"), "We couldn't find that generation.");
+    const variant = Number(c.req.param("variant"));
+    if (!Number.isInteger(variant) || variant < 0 || variant >= VARIATIONS) throw new ApiException("NOT_FOUND", "We couldn't find that render.");
+
+    const job = await loadJob(jobId, user.id);
+    const entry = job.stored.renders?.[String(variant)];
+    const design = job.stored.designs?.[variant];
+    if (!entry || !design) throw new ApiException("NOT_FOUND", "That render hasn't been started.");
+    if (entry.status === "done") return c.json(await doneStatus(job, variant, entry, user.id));
+    if (entry.status === "failed") throw new ApiException("GENERATION_FAILED", renderFailedMessage(entry.charged), { balance: await getBalance(user.id) });
+
+    const fail = async (reason: string) => {
+      const balance =
+        entry.charged > 0
+          ? await addCredits({ userId: user.id, amount: entry.charged, reason: "refund:render", idempotencyKey: `refund:${entry.chargeKey}` })
+          : await getBalance(user.id);
+      await saveRender(jobId, job.stored, variant, { ...entry, status: "failed", error: reason });
+      await logRenderFailure(user.id, jobId, job.prompt, variant, reason);
+      throw new ApiException("GENERATION_FAILED", renderFailedMessage(entry.charged), { balance });
+    };
+
+    if (stale(entry)) return fail("timed out waiting for the renderer");
+    const result = await collectRender(entry.generationId!, async (bytes) => {
       const key = `${user.id}/renders/${jobId}-${variant}.png`;
       await putObject("public", key, bytes, "image/png");
       return publicUrl(key);
     });
-
-    if (!result?.rendered) {
-      if (cost > 0) balance = await addCredits({ userId: user.id, amount: cost, reason: "refund:render", idempotencyKey: `refund:${chargeKey}` });
-      await prisma.aiGenerationLog
-        .create({ data: { userId: user.id, jobId, prompt: job.prompt, errorCode: "RENDER_FAILED", message: result?.error ?? "unknown", details: { variant } } })
-        .catch((logError: unknown) => console.error("[render] could not log failure", logError));
-      throw new ApiException("GENERATION_FAILED", "We couldn't render this design right now. Open the editable version instead — nothing was charged.", { balance });
+    if (result.status === "failed") return fail(result.reason);
+    if (result.status === "pending") {
+      const pending: RenderStatus = { status: "pending", startedAt: entry.startedAt, charged: entry.charged, balance: await getBalance(user.id) };
+      return c.json(pending, 202);
     }
 
-    const url = (result.doc.nodes[0] as { src: string }).src;
-    return deliver(url, cost, balance, { ...stored.renders, [String(variant)]: { url, seed: result.seed, at: new Date().toISOString() } });
+    const done: StoredRender = { ...entry, status: "done", url: result.url, seed: result.seed };
+    // The render becomes the project's canvas and thumbnail.
+    const doc = renderedDoc(design, result.url);
+    await prisma.$transaction([
+      prisma.flyerProject.update({ where: { id: job.projectId, userId: user.id }, data: { canvas: json(doc), thumbnailUrl: result.url, revision: { increment: 1 } } }),
+      prisma.generationJob.update({ where: { id: jobId }, data: { variations: json(withRender(job.stored, variant, done)) } }),
+    ]);
+    return c.json(await doneStatus(job, variant, done, user.id));
   });
+
+// ── Render bookkeeping ─────────────────────────────────────────────────────────
+
+/** A render that hasn't finished after this long is treated as failed (and refunded). */
+const RENDER_DEADLINE_MS = 10 * 60_000;
+
+function stale(entry: StoredRender) {
+  return entry.status === "pending" && Date.now() - Date.parse(entry.startedAt) > RENDER_DEADLINE_MS;
+}
+
+function renderFailedMessage(charged: number) {
+  return `We couldn't render this design right now. Open the editable version instead${charged > 0 ? " — your credits were returned" : " — nothing was charged"}.`;
+}
+
+async function loadJob(jobId: string, userId: string) {
+  const job = await prisma.generationJob.findFirst({ where: { id: jobId, userId }, select: { variations: true, projectId: true, prompt: true } });
+  if (!job?.projectId) throw new ApiException("NOT_FOUND", "We couldn't find that generation.");
+  return { projectId: job.projectId, prompt: job.prompt, stored: job.variations as unknown as StoredVariations };
+}
+
+function withRender(stored: StoredVariations, variant: number, entry: StoredRender): StoredVariations {
+  return { ...stored, renders: { ...stored.renders, [String(variant)]: entry } };
+}
+
+async function saveRender(jobId: string, stored: StoredVariations, variant: number, entry: StoredRender) {
+  await prisma.generationJob.update({ where: { id: jobId }, data: { variations: json(withRender(stored, variant, entry)) } });
+}
+
+async function doneStatus(job: { stored: StoredVariations }, variant: number, entry: StoredRender, userId: string): Promise<RenderStatus> {
+  const design = job.stored.designs![variant]!;
+  return { status: "done", doc: renderedDoc(design, entry.url!), thumbnailUrl: entry.url!, charged: entry.charged, balance: await getBalance(userId) };
+}
+
+async function logRenderFailure(userId: string, jobId: string, prompt: string, variant: number, message: string) {
+  await prisma.aiGenerationLog
+    .create({ data: { userId, jobId, prompt, errorCode: "RENDER_FAILED", message, details: { variant } } })
+    .catch((error: unknown) => console.error("[render] could not log failure", error));
+}

@@ -65,9 +65,12 @@ Never ask an image model to "make a flyer" from the user's prompt.
   frame becomes an element with an exact bbox (0–1000, `[y_min, x_min, y_max, x_max]`), its exact
   words and its colour palette.
 - **Render only the chosen design.** `POST /api/generate` returns the three editable engine designs
-  (stored on `generation_jobs.variations.designs`); `POST /api/generate/:jobId/render` renders the one
-  the user picks (`apps/api/src/render.ts`), copies it into R2 (renderer URLs expire) and makes it the
-  project canvas as a locked full-page image node. The first render per generation is included;
+  (stored on `generation_jobs.variations.designs`); `POST /api/generate/:jobId/render` **starts** a render of
+  the one the user picks (Ideogram async mode) and returns at once; the client polls
+  `GET /api/generate/:jobId/render/:variant`, and the first poll that sees it finished copies it into R2
+  (renderer URLs expire) and makes it the project canvas as a locked full-page image node. Never hold an
+  HTTP request open for a render: Ideogram takes 15–130s and has slow spells. Renders still pending after
+  10 minutes are failed and refunded. The first render per generation is included;
   others cost `CREDIT_COSTS.render` (refunded on failure); re-opening a rendered design is free.
   Never render all variants up front — that triples the per-generation model cost.
 - A render failure or refusal leaves the editable design untouched and charges nothing.

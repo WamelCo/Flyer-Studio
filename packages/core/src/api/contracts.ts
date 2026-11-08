@@ -104,7 +104,7 @@ export interface AuthConfig {
   otpLength: number;
 }
 
-/** POST /api/generate/:jobId/render — one chosen design, finished by the renderer. */
+/** A finished render: the chosen design, finished by the renderer. */
 export interface RenderResponse {
   /** The project's new canvas: the render as a locked full-page image. */
   doc: FlyerDoc;
@@ -113,3 +113,12 @@ export interface RenderResponse {
   charged: number;
   balance: number;
 }
+
+/**
+ * POST /api/generate/:jobId/render starts a render (or reports one already running or
+ * done); GET /api/generate/:jobId/render/:variant polls it. Renders take 15s to a few
+ * minutes, so the client polls "pending" until "done".
+ */
+export type RenderStatus =
+  | { status: "pending"; startedAt: string; charged: number; balance: number }
+  | ({ status: "done" } & RenderResponse);
