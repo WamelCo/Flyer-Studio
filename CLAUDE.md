@@ -54,7 +54,7 @@ pnpm test:director               # Art director against a mock OpenAI-compatible
 pnpm director:try "<prompt>"     # Try the configured art director on a real prompt
 pnpm audit:contrast              # WCAG contrast across every layout × palette × pairing × format
 pnpm test:render                 # Render-prompt compiler rules, offline (no API calls)
-pnpm render:try -- --fixture health [--dry]   # Render a fixture through Ideogram (costs ~$0.10)
+pnpm render:try -- --fixture health [--dry]   # Render a fixture through Ideogram (costs $0.03)
 ```
 
 ---

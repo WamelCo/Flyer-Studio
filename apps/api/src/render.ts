@@ -28,7 +28,8 @@ export function renderingEnabled() {
 }
 
 function renderQuality(): RenderQuality {
-  return process.env.IDEOGRAM_QUALITY === "medium" ? "medium" : "high";
+  const quality = process.env.IDEOGRAM_QUALITY;
+  return quality === "medium" || quality === "high" ? quality : "low";
 }
 
 /** A one-node document whose page is the rendered design, ready for the editor and export. */

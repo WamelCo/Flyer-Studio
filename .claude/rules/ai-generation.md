@@ -85,4 +85,6 @@ Never ask an image model to "make a flyer" from the user's prompt.
     a position word — otherwise the model relocates them semantically.
   - Photos inside frames: "no legible text, signs or logos" (otherwise garbled signage appears).
 - Iterate with `pnpm render:try -- --fixture <name>` or `--prompt "<text>" --variant 0|1|2` (add `--dry`
-  for a free price quote). Each real render costs ~$0.06 (medium) / ~$0.10 (high).
+  for a free price quote). Each real render costs $0.03 (low, default) / $0.06 (medium) / $0.10 (high).
+- Cheaper non-Ideogram models were A/B tested and rejected: they read the structured JSON as plain text
+  (Nano Banana printed "-4°", Z-Image printed hex codes, GPT Image ignored the layout, P-Image garbled copy).

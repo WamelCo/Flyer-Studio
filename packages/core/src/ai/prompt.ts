@@ -66,7 +66,9 @@ function titleCase(text: string) {
 export function extractCopy(prompt: string, intent: FlyerIntent): FlyerCopy {
   const clauses = prompt
     .replace(LEAD_INS, "")
-    .split(/[,.;\n]|\s[-–—]\s/)
+    // Commas and dots split clauses, but not inside numbers: "US$1,200", "3.5kVA".
+    // A question ends its clause and keeps its mark: "Cracked screen?" is a headline.
+    .split(/(?<!\d),|,(?!\d)|(?<!\d)\.|\.(?!\d)|[;\n]|\s[-–—]\s|(?<=\?)\s+/)
     .map((clause) => clause.trim())
     .filter(Boolean);
 
@@ -94,7 +96,8 @@ export function extractCopy(prompt: string, intent: FlyerIntent): FlyerCopy {
   // For sales the discount becomes the headline; what is discounted moves to the details.
   const remainder = discount ? first.replace(discount, "").trim() : "";
   const details = (remainder ? [remainder, ...rest] : rest)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    // Capitalise the clause, but leave brand casing alone ("iPhone", "eBay").
+    .map((part) => (/^[a-z]+[A-Z]/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
     .join("  ·  ")
     .slice(0, 120);
 

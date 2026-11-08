@@ -9,7 +9,12 @@ import { RENDER_SIZES, type IdeogramPrompt } from "./render-prompt";
 
 const API = "https://api.ideogram.ai";
 
-export type RenderQuality = "medium" | "high";
+/**
+ * Ideogram 4.5 bills by quality, not size: low $0.03, medium $0.06, high $0.10 per image
+ * (dry-run quotes, Nov 2026). With our structured prompts, low keeps the layout, copy and
+ * typefaces of high (A/B tested), so it is the default.
+ */
+export type RenderQuality = "low" | "medium" | "high";
 
 export interface RenderResult {
   url: string;
@@ -60,7 +65,7 @@ export async function renderFlyer(
         prompt: promptText,
         magic_prompt: "off",
         resolution: `${size.width}x${size.height}`,
-        rendering_speed: options.quality === "medium" ? "default" : "quality",
+        rendering_speed: options.quality === "high" ? "quality" : options.quality === "medium" ? "default" : "turbo",
         num_images: options.count ?? 1,
         ...(options.seed !== undefined && { seed: options.seed }),
       }),
@@ -72,7 +77,7 @@ export async function renderFlyer(
     form.append("prompt", promptText);
     form.append("magic_prompt", "off");
     form.append("size", `${size.width}x${size.height}`);
-    form.append("quality", options.quality ?? "high");
+    form.append("quality", options.quality ?? "low");
     form.append("background", "opaque");
     form.append("num_images", String(options.count ?? 1));
     if (options.seed !== undefined) form.append("seed", String(options.seed));

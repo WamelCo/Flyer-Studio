@@ -27,7 +27,7 @@ const { values } = parseArgs({
   options: {
     fixture: { type: "string", multiple: true },
     dry: { type: "boolean", default: false },
-    quality: { type: "string", default: "high" },
+    quality: { type: "string", default: "low" },
     seed: { type: "string" },
     out: { type: "string", default: "render-out" },
     tag: { type: "string", default: "" },
@@ -120,7 +120,7 @@ for (const name of names) {
 
   const started = Date.now();
   const [image] = await renderFlyer(prompt, fixture.format, {
-    quality: values.quality as "medium" | "high",
+    quality: values.quality as "low" | "medium" | "high",
     ...(values.seed && { seed: Number(values.seed) }),
   });
   ledger.used += 1;

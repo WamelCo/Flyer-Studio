@@ -34,7 +34,8 @@ Optional:
   type, contrast); Ideogram 4.5 then renders that exact layout as a finished graphic from a compiled structured
   prompt — see `packages/core/src/design/render-prompt.ts` and `principles.ts`. Each variant falls back to its
   editable engine design if rendering fails. Generation returns the three editable designs quickly; only the
-  design the user picks is rendered (~$0.10 at high quality, `IDEOGRAM_QUALITY=medium` for ~$0.06). The first
+  design the user picks is rendered ($0.03 at the default low quality, which A/B tests showed matches high for
+  our structured prompts; `IDEOGRAM_QUALITY=medium|high` for $0.06 / $0.10). The first
   render of a generation is included in its credits; rendering another design from it costs
   `CREDIT_COSTS.render`. Try it with `pnpm render:try -- --fixture health`.
 - **Stripe (test mode)**: put `STRIPE_SECRET_KEY` (sk_test_…) and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (pk_test_…)

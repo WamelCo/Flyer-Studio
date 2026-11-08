@@ -208,6 +208,27 @@ const CATEGORY_CTA: Record<Category, string> = {
   other: "Learn more",
 };
 
+/** A lead-in that fits the category and claims nothing (rules path; models write their own). */
+const CATEGORY_EYEBROW: Partial<Record<Category, string>> = {
+  corporate: "At your service",
+  health: "Your health first",
+  recruitment: "We're hiring",
+  food: "Now serving",
+  education: "Learn with us",
+  community: "All are welcome",
+  tech: "Fast & reliable",
+  beauty: "Look your best",
+  fitness: "Get moving",
+  travel: "Explore",
+  seasonal: "Celebrate",
+  sale: "Special offers",
+  party: "You're invited",
+  real_estate: "Just listed",
+};
+
+/** Farm inputs use food's palettes (above) but not its restaurant lead-in. */
+const FARM_INPUTS = /\b(chicks|poultry|broilers?|layers|fertili[sz]ers?|seed maize|stock ?feed|farm inputs|agro)\b/i;
+
 /** Coarse category stored on generation_jobs (its check constraint predates the design engine). */
 export function storedIntent(category: Category): "event" | "sale" | "real_estate" | "party" {
   if (category === "sale") return "sale";
@@ -222,36 +243,102 @@ export function storedIntent(category: Category): "event" | "sale" | "real_estat
  * Contact details the user stated, lifted out before the prompt is split into clauses —
  * the splitter breaks on "." and would turn "lotusyoga.com" into "Lotusyoga · Com".
  */
+/**
+ * Phone numbers as people write them: Zimbabwean mobiles and landlines ("0772 145 682",
+ * "+263 71 233 0918", "020 2061 345"), and international or US-style formats.
+ */
+const PHONE_PATTERN =
+  /(?:\+\d{1,3}[\s.-]?)?(?:\(\d{1,4}\)[\s.-]?)?\b\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b|\+\d{1,3}[\s.-]?\d{2,3}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b/g;
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function extractContact(prompt: string) {
   const email = prompt.match(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/)?.[0] ?? null;
   const withoutEmail = email ? prompt.replace(email, " ") : prompt;
   const website = withoutEmail.match(/\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[^\s,]*)?\b/i)?.[0] ?? null;
-  const phone = prompt.match(/(?:\+\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?\d{3}[\s.-]\d{3,4}(?:[\s.-]\d{3,4})?\b/)?.[0] ?? null;
+  // Prices aren't phone numbers ("US$1,200"); only digit runs long enough to dial.
+  const phones = [...withoutEmail.matchAll(PHONE_PATTERN)]
+    .map((match) => ({ value: match[0].trim(), index: match.index ?? 0 }))
+    .filter(({ value, index }) => value.replace(/\D/g, "").length >= 9 && !/[$€£]\s*$|zig\s*$/i.test(withoutEmail.slice(Math.max(0, index - 5), index)));
+  // A number the user labelled WhatsApp keeps the label — the main channel for many businesses.
+  const labelled = phones.map(({ value, index }) => ({
+    value,
+    whatsapp: /whats\s?app\s*(?:us\s*)?(?:on\s*)?:?\s*$/i.test(withoutEmail.slice(Math.max(0, index - 16), index)),
+  }));
+  const primary = labelled.find((p) => p.whatsapp) ?? labelled[0] ?? null;
+  const others = labelled.filter((p) => p !== primary);
+
   let rest = prompt;
-  for (const value of [email, website, phone]) {
-    if (value) rest = rest.replace(new RegExp(`(?:,?\\s*(?:call|email|visit|at|on|or)\\s+)?${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"), " ");
+  for (const value of [email, website, ...phones.map((p) => p.value)]) {
+    // Lead-ins go with the number: "orders on WhatsApp 0783…", "or call +263…".
+    if (value) rest = rest.replace(new RegExp(`(?:,?\\s*(?:(?:orders?|bookings?|enquiries|call|phone|sms|whats\\s?app(?:\\s+us)?|email|visit|via|at|on|or)\\s*:?\\s+)+)?${escapeRegExp(value)}`, "i"), " ");
   }
-  return { email, website, phone, rest: rest.replace(/\s+([,.;])/g, "$1").replace(/[,\s]+$/, "").trim() };
+  rest = rest.replace(/\b(?:or|and)\s*(?=[,.;]|$)/gi, " ");
+  return {
+    email,
+    website,
+    phone: primary ? `${primary.whatsapp ? "WhatsApp " : ""}${primary.value}` : null,
+    otherPhones: others.map((p) => `${p.whatsapp ? "WhatsApp" : "Call"} ${p.value}`),
+    whatsapp: labelled.some((p) => p.whatsapp) || /whats\s?app/i.test(prompt),
+    rest: rest.replace(/\s+([,.;])/g, "$1").replace(/(?:[,;]\s*){2,}/g, ", ").replace(/[,\s]+$/, "").trim(),
+  };
+}
+
+/**
+ * The category from what the business does — the engine has palettes, type and layouts
+ * tuned for each. Order matters: the first match wins. Null falls back to the intent.
+ */
+const CATEGORY_KEYWORDS: [Category, RegExp][] = [
+  ["real_estate", /\b(open house|for rent|to let|for lease|just listed|real estate|apartment|bedroom|stands? for sale|residential stands?|plots?|property|house for sale|rooms? to rent)\b/i],
+  ["recruitment", /\b(hiring|vacanc(?:y|ies)|we'?re recruiting|job openings?|apply now|now recruiting)\b/i],
+  ["education", /(?<!back to )\b(school|enrol(?:l)?(?:ing|ment)?|tuition|tutoring|lessons|academy|college|driving school|training (?:course|centre|center)|form [1-6]|ecd|o ?level|a ?level|courses?)\b/i],
+  ["health", /\b(clinic|pharmacy|chemist|doctor|dental|dentist|medical|optometrist|hospital|wellness centre)\b/i],
+  ["beauty", /\b(salon|hair|braids?|nails?|barber(?:shop)?|make-?up|spa|lashes|wigs?|beauty|cosmetics)\b/i],
+  ["fitness", /\b(gym|yoga|fitness|workout|bootcamp|aerobics|personal trainer|zumba)\b/i],
+  ["food", /\b(restaurant|kitchen|takeaways?|sadza|braai|shisa nyama|bakery|cafe|café|catering|menu|pizza|pizzeria|grill|food|lunch|dinner|breakfast|butchery)\b/i],
+  // Farm inputs share food's earthy palettes and leaf motifs.
+  ["food", /\b(chicks|poultry|broilers?|layers|fertili[sz]ers?|seed maize|stock ?feed|farm inputs|agro)\b/i],
+  ["tech", /\b(phone repairs?|screen repairs?|laptops?|software|app launch|internet|wi-?fi|computers?|cctv|solar|inverters?|electronics)\b/i],
+  ["travel", /\b(tours?|travel|safari|flights?|holiday packages?|lodge)\b/i],
+  ["community", /\b(church|crusade|revival|prayer|gospel|fundraiser|ministry|congregation|youth camp|community)\b/i],
+  ["seasonal", /\b(christmas|easter|thanksgiving|independence day|heroes day|new year)\b/i],
+  ["party", /\b(party|birthday|celebration|wedding|anniversary|bridal shower|baby shower)\b/i],
+  ["sale", /\b(sale|specials?|discount|deals?|clearance|promo(?:tion)?|% ?off|wholesale prices?)\b|\d+ ?%/i],
+  ["corporate", /\b(consult(?:ing|ancy)?|accounting|legal|insurance|logistics|construction|hardware|plumbing|electrical|cleaning services)\b/i],
+];
+
+function classifyCategory(prompt: string): Category | null {
+  return CATEGORY_KEYWORDS.find(([, pattern]) => pattern.test(prompt))?.[0] ?? null;
 }
 
 export function rulesBrief(prompt: string): DesignBrief {
   const intent = classifyIntent(prompt);
-  const category: Category = intent === "real_estate" ? "real_estate" : intent;
+  const category: Category = classifyCategory(prompt) ?? (intent === "real_estate" ? "real_estate" : intent);
   const contact = extractContact(prompt);
   const copy = extractCopy(contact.rest || prompt, intent);
   const defaults = CATEGORY_DEFAULTS[category];
-  const price = prompt.match(/[$€£]\s?\d+(?:[.,]\d{2})?/)?.[0];
+  // US$ / $ / € / £ and ZiG, with thousands separators: "US$1,200", "ZiG 31,000".
+  const priceMatch = /(?:US\$|[$€£])\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\bZiG\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/i.exec(prompt);
+  const price = priceMatch?.[0];
+  // "from US$1,200" is a starting price, not the price.
+  const priceText = price && /\bfrom\s*$/i.test(prompt.slice(0, priceMatch!.index)) ? `From ${price}` : price;
   // A time or range: "8pm", "10:30am", "1–4pm", "10am - 6pm".
   const time = prompt.match(/\b\d{1,2}(?::\d{2})?\s?(?:am|pm)?\s?[–-]\s?\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/i)?.[0];
-  const day = prompt.match(/\b(?:mon|tues|wednes|thurs|fri|satur|sun)day\b/i)?.[0];
+  // A day or a range of days: "Saturday", "Monday to Saturday".
+  const dayName = String.raw`(?:mon|tues|wednes|thurs|fri|satur|sun)day`;
+  const day = prompt.match(new RegExp(String.raw`\b${dayName}(?:\s*(?:to|through|-|–)\s*${dayName})?\b`, "i"))?.[0];
+  // A calendar date: "14 March", "March 14".
+  const month = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*`;
+  const date = prompt.match(new RegExp(String.raw`\b\d{1,2}(?:st|nd|rd|th)?\s+${month}\b|\b${month}\s+\d{1,2}(?:st|nd|rd|th)?\b`, "i"))?.[0];
   // Logistics get their own detail rows, unless the headline already says them.
   const fresh = (token: string | undefined): token is string => Boolean(token) && !copy.headline.toLowerCase().includes(token!.toLowerCase());
-  const when = [day, time].filter(fresh);
+  const when = [[day, date].filter(fresh).join(" "), time].filter((part): part is string => Boolean(part) && fresh(part));
   const details = [
     when.length ? { icon: "calendar" as IconName, text: when.join(", ") } : null,
-    fresh(price) ? { icon: "ticket" as IconName, text: price } : null,
+    fresh(price) ? { icon: "ticket" as IconName, text: priceText! } : null,
+    ...contact.otherPhones.map((text) => ({ icon: "phone" as IconName, text })),
   ].filter((d): d is { icon: IconName; text: string } => Boolean(d));
-  const subhead = withoutLogistics(copy.details, [day, time, price].filter((t): t is string => Boolean(t)));
+  const subhead = withoutLogistics(copy.details, [day, date, time, price].filter((t): t is string => Boolean(t)));
   return {
     category,
     audience: "general public",
@@ -259,7 +346,7 @@ export function rulesBrief(prompt: string): DesignBrief {
     rationale: "Composed by the built-in rules: palette, type and layout chosen from the flyer's category.",
     copy: {
       brand: null,
-      eyebrow: copy.tagline,
+      eyebrow: FARM_INPUTS.test(prompt) ? "Order today" : (CATEGORY_EYEBROW[category] ?? copy.tagline),
       headline: copy.headline,
       emphasis: intent === "sale" ? copy.headline.split(" ")[0] ?? null : null,
       subhead: subhead || null,
@@ -268,7 +355,7 @@ export function rulesBrief(prompt: string): DesignBrief {
       bullets: [],
       features: [],
       details,
-      cta: CATEGORY_CTA[category],
+      cta: contact.whatsapp ? "WhatsApp us" : CATEGORY_CTA[category],
       contact: { phone: contact.phone, email: contact.email, website: contact.website, address: null, social: [] },
     },
     layouts: defaults.layouts,
@@ -281,7 +368,7 @@ export function rulesBrief(prompt: string): DesignBrief {
   };
 }
 
-const LOGISTICS_FILLER = /\b(?:tickets?|entry|admission|doors|from|at|on|starts?|only)\b/gi;
+const LOGISTICS_FILLER = /\b(?:tickets?|entry|admission|doors|from|at|on|starts?|only|open|daily)\b/gi;
 
 /**
  * The subline without the day, time and price (they're shown as detail rows), so the
