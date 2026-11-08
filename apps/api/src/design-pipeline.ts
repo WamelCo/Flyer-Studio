@@ -3,8 +3,10 @@ import { decorForVariant, rankedChoices, toDesignCopy, type DesignBrief } from "
 import { chooseVariants, composeDesign, hasRichCopy, type Variant } from "@flyer/core/design/compose";
 import { directDesign } from "@flyer/core/design/director";
 import type { StockPhoto } from "@flyer/core/design/engine";
+import { inferHero } from "@flyer/core/design/imagery";
 import { PALETTES, withBrandColor } from "@flyer/core/design/palettes";
 import { photosForBrief } from "@flyer/core/design/photos";
+import { followReference, type ReferenceStyle } from "@flyer/core/design/reference";
 import type { RenderMeta } from "@flyer/core/design/render-prompt";
 import { PAIRINGS } from "@flyer/core/design/typography";
 
@@ -22,10 +24,16 @@ const placeholderPhotos = (count: number): StockPhoto[] =>
  * (POST /api/generate/:jobId/render). Pure of database and billing, so the route and
  * scripts/try-generate.mts run the same code.
  */
-export async function designFlyers(prompt: string, format: FlyerFormat) {
+export async function designFlyers(prompt: string, format: FlyerFormat, options: { reference?: ReferenceStyle | null } = {}) {
   const { brief, source, model } = await directDesign(prompt, format);
   const copy = toDesignCopy(brief);
-  const choices = rankedChoices(brief);
+  // A reference re-ranks layouts and palettes toward its structure and page tone.
+  const reference = options.reference ?? null;
+  const choices = followReference(rankedChoices(brief), reference);
+  // Its colours stand in for colours the owner didn't ask for explicitly.
+  const brandColor = choices.brandColor ?? reference?.brandColor ?? null;
+  const accentColor = choices.accentColor ?? (choices.brandColor ? null : (reference?.accentColor ?? null));
+  if (reference && !choices.brandColor) Object.assign(brief, { brandColor, accentColor });
   const rendering = renderingEnabled();
   const photoSets = await photosForBrief(brief.photoQueries, format, VARIATIONS);
   // With a renderer, photo layouts don't depend on stock search: it paints the frames.
@@ -45,7 +53,8 @@ export async function designFlyers(prompt: string, format: FlyerFormat) {
       variant,
       photos: layoutPhotos[i] ?? [],
       decor: decorForVariant(choices.decor, i),
-      brandColor: choices.brandColor,
+      brandColor,
+      accentColor,
     }),
   );
   const docs = designs.map(withoutPlaceholderPhotos);
@@ -53,11 +62,17 @@ export async function designFlyers(prompt: string, format: FlyerFormat) {
   return { brief, source, model, copy, variants, designs, docs, photoSets, renderable: rendering };
 }
 
-/** The renderer's brief for one variant, rebuilt from what the job stored. */
-export function renderMeta(brief: DesignBrief, variant: Variant): RenderMeta {
+/**
+ * The renderer's brief for one variant, rebuilt from what the job stored. The hero image
+ * is inferred from the owner's own words (the prompt), then the brief's copy.
+ */
+export function renderMeta(brief: DesignBrief, variant: Variant, prompt = "", reference?: ReferenceStyle | null): RenderMeta {
+  const hero = inferHero(`${prompt} ${brief.copy.headline} ${brief.copy.subhead ?? ""} ${brief.category}`);
   return {
+    ...(hero && { hero }),
+    ...(reference && { reference }),
     archetype: variant.archetype,
-    palette: withBrandColor(PALETTES[variant.palette], rankedChoices(brief).brandColor),
+    palette: withBrandColor(PALETTES[variant.palette], rankedChoices(brief).brandColor, rankedChoices(brief).accentColor),
     pairing: PAIRINGS[variant.pairing],
     subject: `${brief.category.replace("_", " ")} flyer for ${brief.audience}`,
     tone: brief.tone,

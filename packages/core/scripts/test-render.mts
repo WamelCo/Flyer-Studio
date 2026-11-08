@@ -17,6 +17,10 @@ import { PALETTES } from "../src/design/palettes";
 import { PRINCIPLE_IDS, PRINCIPLES } from "../src/design/principles";
 import { colorName, compileRenderPrompt, type IdeogramPrompt } from "../src/design/render-prompt";
 import { PAIRINGS } from "../src/design/typography";
+import { rankedChoices, rulesBrief, toDesignCopy } from "../src/design/brief";
+import { inferHero } from "../src/design/imagery";
+import { followReference, referenceStyleFrom } from "../src/design/reference";
+import { revisionTargets } from "../src/design/revision";
 import { FIXTURES } from "./render-fixtures.mts";
 
 let passed = 0;
@@ -154,6 +158,64 @@ test("every principle has a rule, an enforcement, a directive and a short cue", 
     assert.ok(p.rule && p.enforced && p.directive && p.cue, id);
     assert.ok(p.cue.length <= 90, `${id} cue too long`);
   }
+});
+
+// ── Hero imagery, requested style, references, revisions ───────────────────────
+
+const PHONES =
+  "FixIt Mobile, cracked screen repairs in 1 hour, iPhone and Samsung screens from US$25, Harare CBD, WhatsApp 0719 553 802, black and gold colours";
+
+test("the hero is inferred from the business: a cracked screen is a phone with a shattered screen", () => {
+  const hero = inferHero(PHONES)!;
+  assert.equal(hero.kind, "item");
+  assert.match(hero.subject, /cracked|shattered/);
+});
+
+test("requested colours win, in either order, and never reach the copy; brand casing is kept", () => {
+  const brief = rulesBrief(PHONES);
+  assert.equal(brief.brandColor, "#111111");
+  assert.equal(brief.accentColor, "#C9A227");
+  assert.equal(rulesBrief("Fresh green maize seedlings, call 0772 111 222").brandColor, null);
+  const copy = toDesignCopy(brief);
+  assert.equal(copy.headline.replace(/\n/g, " "), "FixIt Mobile");
+  assert.ok(copy.details.some((d) => d.text === "iPhone and Samsung screens"));
+  assert.ok(!JSON.stringify(copy).toLowerCase().includes("gold"));
+});
+
+test("a colon list becomes bullets", () => {
+  const brief = rulesBrief("Greenway Accountants, tax returns and bookkeeping in Harare: VAT returns, payroll, annual financial statements, call 0242 700 123");
+  const copy = toDesignCopy(brief);
+  assert.deepEqual(copy.bullets.slice(0, 3), ["VAT returns", "Payroll", "Annual financial statements"]);
+  assert.equal(copy.subhead, "Tax returns and bookkeeping in Harare");
+});
+
+test("a light reference keeps a light page and its structure; Swiss goes last", () => {
+  const style = referenceStyleFrom(
+    { high_level_description: "A business flyer with a man, arms crossed, on a clean white background inside a circular graphic behind him." },
+    [
+      { hex: "#F7F7F7", share: 0.8 },
+      { hex: "#385BA9", share: 0.06 },
+    ],
+  );
+  assert.equal(style.tone, "light");
+  assert.equal(style.brandColor, "#385BA9");
+  const ranked = followReference({ layouts: ["swiss-type", "bold-stack"], palettes: ["tech-violet", "trust-blue"] } as Parameters<typeof followReference>[0], style);
+  assert.equal(ranked.layouts[0], "editorial-split");
+  assert.equal(ranked.layouts.at(-1), "swiss-type");
+  for (const id of ranked.palettes) assert.ok(colorName(PALETTES[id].bg).includes("white") || PALETTES[id].bg > "#E0", id);
+});
+
+test("revisions target only the elements named", () => {
+  const brief = rulesBrief(PHONES);
+  const ranked = rankedChoices(brief);
+  const variant = { archetype: "swiss-type" as const, palette: ranked.palettes[0]!, pairing: ranked.pairings[0]! };
+  const doc = composeDesign({ format: "poster", copy: toDesignCopy(brief), variant, photos: [] });
+  const labels = (ask: string) => [...new Set(revisionTargets(doc, ask).map((t) => t.label))];
+  assert.deepEqual(labels("Change the price to US$20"), ["price"]);
+  assert.deepEqual(labels("Make the WhatsApp us button green"), ["button"]);
+  assert.deepEqual(labels("Replace the phones in the image with a Samsung"), ["hero image"]);
+  assert.deepEqual(labels("Change the phone number to 0772 000 000"), ["phone number"]);
+  assert.deepEqual(labels("Make the background warmer"), []);
 });
 
 console.log(`\n${passed} passed`);

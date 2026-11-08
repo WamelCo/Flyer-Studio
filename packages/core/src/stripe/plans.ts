@@ -69,6 +69,8 @@ export const CREDIT_COSTS = {
    * is included in `generate`; rendering another design from the same generation costs this.
    */
   render: 5,
+  /** One revision of a rendered flyer (a precise edit of only the parts asked for). */
+  revise: 3,
 } as const;
 
 /** Credits granted for one paid invoice. Annual invoices grant the full year up front. */

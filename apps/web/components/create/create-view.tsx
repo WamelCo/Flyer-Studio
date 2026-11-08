@@ -8,7 +8,7 @@ import { useCallback, useRef, useState } from "react";
 
 import { CheckoutSheet } from "@/components/billing/checkout-sheet";
 import { GeneratingFrame, ResultFrame } from "@/components/create/generation-stage";
-import { PromptComposer, type PromptComposerHandle } from "@/components/create/prompt-composer";
+import { PromptComposer, type PromptComposerHandle, type StyleReference } from "@/components/create/prompt-composer";
 import { ProjectGrid } from "@/components/projects/project-grid";
 import { useViewer } from "@/components/providers/viewer-provider";
 import { useShell } from "@/components/shell/shell-provider";
@@ -208,6 +208,7 @@ export function CreateView({ recentProjects }: { recentProjects: ProjectSummary[
 
   const [prompt, setPrompt] = useState("");
   const [format, setFormat] = useState<FlyerFormat>("poster");
+  const [reference, setReference] = useState<StyleReference | null>(null);
   const [generation, setGeneration] = useState<Generation>({ status: "idle" });
   const active = generation.status !== "idle";
 
@@ -218,7 +219,7 @@ export function CreateView({ recentProjects }: { recentProjects: ProjectSummary[
     setGeneration({ status: "generating", format });
 
     try {
-      const result = await apiFetch<GenerateResponse>("/api/generate", { method: "POST", json: { prompt, format } });
+      const result = await apiFetch<GenerateResponse>("/api/generate", { method: "POST", json: { prompt, format, ...(reference && { referenceUrl: reference.url }) } });
       setCredits(result.balance);
       setGeneration({ status: "done", result });
       router.refresh();
@@ -276,6 +277,8 @@ export function CreateView({ recentProjects }: { recentProjects: ProjectSummary[
               onSubmit={generate}
               busy={generation.status === "generating"}
               compact={active}
+              reference={reference}
+              onReferenceChange={setReference}
             />
           </motion.div>
           <AnimatePresence initial={false}>

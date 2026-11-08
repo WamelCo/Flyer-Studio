@@ -41,7 +41,7 @@ for (const scenario of ZW_SCENARIOS.filter((s) => !only || only.has(s.id))) {
 
   const index = Number(picks.get(scenario.id) ?? 0);
   const started = Date.now();
-  const [render] = await renderVariants([result.designs[index]!], [renderMeta(result.brief, result.variants[index]!)], async (bytes) => {
+  const [render] = await renderVariants([result.designs[index]!], [renderMeta(result.brief, result.variants[index]!, scenario.prompt)], async (bytes) => {
     const file = join(out, `${scenario.id}.png`);
     writeFileSync(file, bytes);
     return pathToFileURL(file).href;

@@ -171,3 +171,56 @@ export async function renderFlyer(
     if (check.status === "failed") throw new IdeogramError(`Render failed: ${check.reason}`, 502, check.blocked);
   }
 }
+
+// ── References and revisions ───────────────────────────────────────────────────
+
+export interface ImageFile {
+  bytes: Uint8Array;
+  /** image/png, image/jpeg or image/webp */
+  type: string;
+}
+
+const fileOf = (image: ImageFile, _name: string) => new Blob([new Uint8Array(image.bytes)], { type: image.type });
+
+/**
+ * Reads an image (a reference flyer) into Ideogram's structured prompt format, with a
+ * style description: the same vocabulary our compiler writes, so its style transfers.
+ */
+export async function describeReference(image: ImageFile, options: { signal?: AbortSignal } = {}): Promise<{
+  high_level_description?: string;
+  style_description?: { aesthetics?: string; art_style?: string; medium?: string; lighting?: string; color_palette?: string[] };
+  compositional_deconstruction?: { background?: string; elements?: { desc?: string }[] };
+}> {
+  const form = new FormData();
+  form.append("image", fileOf(image, "reference"), "reference");
+  form.append("include_style_descriptions", "true");
+  form.append("include_bbox", "false");
+  const response = await fetch(`${API}/v2/image/describe/ideogram-4`, { method: "POST", headers: { "Api-Key": apiKey() }, body: form, signal: options.signal });
+  if (!response.ok) throw await errorFrom(response);
+  const body = (await response.json()) as { json_prompt?: Record<string, unknown> };
+  return (body.json_prompt ?? {}) as Awaited<ReturnType<typeof describeReference>>;
+}
+
+/**
+ * Starts a precise edit (Ideogram 4.5): only what the instruction changes is redrawn;
+ * every other pixel is copied from the source. A mask (black = edit, white = keep)
+ * confines the edit further. Poll the returned id with checkRender().
+ * Prices by quality only: very_low $0.008, low $0.03, medium $0.06, high $0.22.
+ */
+export async function startPreciseEdit(
+  image: ImageFile,
+  instruction: string,
+  options: { mask?: ImageFile; quality?: "very_low" | "low" | "medium" | "high"; signal?: AbortSignal } = {},
+): Promise<string> {
+  const form = new FormData();
+  form.append("prompt", instruction);
+  form.append("image", fileOf(image, "image"), "image");
+  if (options.mask) form.append("mask", fileOf(options.mask, "mask"), "mask.png");
+  form.append("quality", options.quality ?? "low");
+  form.append("async", "true");
+  const response = await fetch(`${API}/v2/image/precise-edit/ideogram-4-5`, { method: "POST", headers: { "Api-Key": apiKey() }, body: form, signal: options.signal });
+  if (!response.ok) throw await errorFrom(response);
+  const body = (await response.json().catch(() => null)) as { generation_id?: string } | null;
+  if (!body?.generation_id) throw new IdeogramError("Ideogram accepted the edit but returned no generation id", 502);
+  return body.generation_id;
+}

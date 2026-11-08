@@ -18,6 +18,12 @@ const Body = z.discriminatedUnion("kind", [
     contentType: z.string(),
     size: z.number().int().positive(),
   }),
+  // A reference flyer whose style a new design should follow.
+  z.object({
+    kind: z.literal("reference"),
+    contentType: z.string(),
+    size: z.number().int().positive(),
+  }),
   z.object({
     kind: z.literal("thumbnail"),
     contentType: z.literal("image/webp"),
@@ -35,11 +41,11 @@ export const uploads = new Hono<AppEnv>().use(requireUser).post("/", async (c) =
   const body = await parseJson(c, Body);
 
   let key: string;
-  if (body.kind === "image") {
+  if (body.kind === "image" || body.kind === "reference") {
     const extension = IMAGE_TYPES[body.contentType];
     if (!extension) throw new ApiException("VALIDATION_ERROR", "Use a PNG, JPEG or WebP image.");
     if (body.size > MAX_IMAGE_BYTES) throw new ApiException("VALIDATION_ERROR", "Images must be 10 MB or smaller.");
-    key = `${user.id}/uploads/${randomUUID()}.${extension}`;
+    key = `${user.id}/${body.kind === "reference" ? "references" : "uploads"}/${randomUUID()}.${extension}`;
   } else {
     const project = await prisma.flyerProject.findFirst({ where: { id: body.projectId, userId: user.id }, select: { id: true } });
     if (!project) throw new ApiException("NOT_FOUND", "This project doesn't exist or isn't yours.");

@@ -9,6 +9,7 @@ import { exportsRoute } from "./routes/exports";
 import { generate } from "./routes/generate";
 import { config, me, photos } from "./routes/misc";
 import { projects } from "./routes/projects";
+import { revisions } from "./routes/revisions";
 import { uploads } from "./routes/uploads";
 import { webhooks } from "./routes/webhooks";
 
@@ -24,6 +25,7 @@ export const app = new Hono<AppEnv>()
   .on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
   .route("/api/config", config)
   .route("/api/me", me)
+  .route("/api/projects/:projectId/revisions", revisions)
   .route("/api/projects", projects)
   .route("/api/generate", generate)
   .route("/api/export", exportsRoute)

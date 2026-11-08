@@ -183,13 +183,17 @@ export const PALETTES: Record<PaletteId, Palette> = Object.fromEntries(
 ) as Record<PaletteId, Palette>;
 
 /** Re-key a palette around a client's brand colour while keeping its harmony and contrast. */
-export function withBrandColor(palette: Palette, brandColor: string | null | undefined): Palette {
-  if (!isHex(brandColor)) return palette;
-  const primary = normalizeHex(brandColor);
-  return {
-    ...palette,
-    primary,
-    onPrimary: readableOn(primary, ["#FFFFFF", palette.ink, "#111111"]),
-    tint: mix(primary, palette.bg, 0.84),
-  };
+export function withBrandColor(palette: Palette, brandColor: string | null | undefined, accentColor?: string | null): Palette {
+  let next = palette;
+  if (isHex(brandColor)) {
+    const primary = normalizeHex(brandColor);
+    next = { ...next, primary, onPrimary: readableOn(primary, ["#FFFFFF", next.ink, "#111111"]), tint: mix(primary, next.bg, 0.84) };
+  }
+  // A second requested colour becomes the accent (emphasis, call to action); text on it
+  // is picked for contrast like every other role.
+  if (isHex(accentColor)) {
+    const accent = normalizeHex(accentColor);
+    next = { ...next, accent, accent2: accent, onAccent: readableOn(accent, ["#FFFFFF", next.ink, "#111111"]) };
+  }
+  return next;
 }

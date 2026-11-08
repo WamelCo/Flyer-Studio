@@ -116,6 +116,7 @@ model Profile {
   generationJobs GenerationJob[]
   generationLogs AiGenerationLog[]
   exports        FlyerExport[]
+  revisions      ProjectRevision[]
 
   @@map("profiles")
 }
@@ -161,6 +162,7 @@ model FlyerProject {
 
   jobsProducing GenerationJob[] @relation("JobProject")
   exports       FlyerExport[]
+  revisions     ProjectRevision[]
 
   @@index([userId, updatedAt(sort: Desc)])
   @@map("flyer_projects")
@@ -226,4 +228,32 @@ model FlyerExport {
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("exports")
+}
+
+/// One requested change to a rendered flyer ("change the price to US$20"), applied with a
+/// precise edit: only the targeted elements are redrawn. Keeps the source image for undo.
+model ProjectRevision {
+  id           String       @id @default(uuid()) @db.Uuid
+  projectId    String       @map("project_id") @db.Uuid
+  project      FlyerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId       String       @map("user_id")
+  profile      Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  instruction  String
+  /// pending | done | failed
+  status       String       @default("pending")
+  /// The renderer's generation id, polled until the edit finishes.
+  generationId String?      @map("generation_id")
+  /// The image that was edited (undo restores it) and the result.
+  sourceUrl    String       @map("source_url")
+  resultUrl    String?      @map("result_url")
+  /// The elements the edit was confined to (labels and pixel boxes), when any matched.
+  targets      Json         @default("[]")
+  creditsSpent Int          @default(0) @map("credits_spent")
+  chargeKey    String?      @map("charge_key")
+  error        String?
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt  DateTime?    @map("completed_at") @db.Timestamptz(6)
+
+  @@index([projectId, createdAt(sort: Desc)])
+  @@map("project_revisions")
 }

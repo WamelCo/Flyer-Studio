@@ -5,6 +5,7 @@ import { ARCHETYPE_IDS, type ArchetypeId } from "./archetypes";
 import { isHex, normalizeHex } from "./color";
 import { DECOR_LEVELS, MOTIF_IDS, type Decor, type DecorLevel, type MotifId } from "./decor";
 import { ICON_NAMES, type DesignCopy, type IconName } from "./engine";
+import { inferHero } from "./imagery";
 import { PALETTE_IDS, type PaletteId } from "./palettes";
 import { PAIRING_IDS, type PairingId } from "./typography";
 
@@ -72,7 +73,8 @@ export const BriefSchema = z.object({
     .enum(DECOR_LEVELS)
     .describe("How much decoration: minimal (corporate, clinical, luxury restraint), balanced (most flyers), bold (parties, sales, kids, sport)."),
   motifs: z.array(z.enum(MOTIF_IDS)).describe("One to three decorative motifs, best first, that suit the mood."),
-  brandColor: nullableText.describe("A hex colour only if the user named a brand colour."),
+  brandColor: nullableText.describe("A hex colour only if the user asked for a colour or named a brand colour (their first colour)."),
+  accentColor: nullableText.optional().describe("A second hex colour only if the user asked for two colours (e.g. 'black and gold' → gold)."),
   photoQueries: z
     .array(z.string())
     .describe("0–3 stock-photo search queries (2–4 plain words each) for the layout's photo frames; empty for purely graphic designs."),
@@ -149,6 +151,7 @@ export function rankedChoices(brief: DesignBrief) {
     palettes: pad<PaletteId>(brief.palettes, defaults.palettes),
     pairings: pad<PairingId>(brief.pairings, defaults.pairings),
     brandColor: isHex(brief.brandColor) ? normalizeHex(brief.brandColor) : null,
+    accentColor: isHex(brief.accentColor) ? normalizeHex(brief.accentColor!) : null,
     decor: { level: brief.decor, motifs: pad<MotifId>(brief.motifs, defaults.motifs) } satisfies Decor,
   };
 }
@@ -252,7 +255,7 @@ const PHONE_PATTERN =
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function extractContact(prompt: string) {
+export function extractContact(prompt: string) {
   const email = prompt.match(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/)?.[0] ?? null;
   const withoutEmail = email ? prompt.replace(email, " ") : prompt;
   const website = withoutEmail.match(/\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[^\s,]*)?\b/i)?.[0] ?? null;
@@ -304,17 +307,74 @@ const CATEGORY_KEYWORDS: [Category, RegExp][] = [
   ["seasonal", /\b(christmas|easter|thanksgiving|independence day|heroes day|new year)\b/i],
   ["party", /\b(party|birthday|celebration|wedding|anniversary|bridal shower|baby shower)\b/i],
   ["sale", /\b(sale|specials?|discount|deals?|clearance|promo(?:tion)?|% ?off|wholesale prices?)\b|\d+ ?%/i],
-  ["corporate", /\b(consult(?:ing|ancy)?|accounting|legal|insurance|logistics|construction|hardware|plumbing|electrical|cleaning services)\b/i],
+  ["corporate", /\b(consult(?:ing|ancy|ants?)?|accounting|accountants?|bookkeeping|tax returns|legal|lawyers?|insurance|logistics|construction|hardware|plumbing|electrical|cleaning services)\b/i],
 ];
 
 function classifyCategory(prompt: string): Category | null {
   return CATEGORY_KEYWORDS.find(([, pattern]) => pattern.test(prompt))?.[0] ?? null;
 }
 
+/** Colour words people use, as hexes tuned to sit well in the engine's palettes. */
+const COLOR_WORDS: Record<string, string> = {
+  red: "#D62828", maroon: "#7A1C2B", burgundy: "#7A1C2B", pink: "#E0457B", orange: "#F77F00", yellow: "#F2C200",
+  gold: "#C9A227", golden: "#C9A227", green: "#1B7F3B", lime: "#7CC242", olive: "#6B7A2A", teal: "#0F8B8D",
+  turquoise: "#19B3A6", blue: "#1F4FD1", "sky blue": "#3AA0E6", "royal blue": "#2747C9", navy: "#14213D",
+  purple: "#6A3FB5", violet: "#7C4DDB", lilac: "#B79CED", brown: "#7B4B2A", black: "#111111", silver: "#9AA0A6", grey: "#6B7280", gray: "#6B7280",
+};
+
+const LAYOUT_WORDS: [RegExp, ArchetypeId][] = [
+  [/\b(minimal|minimalist|clean|simple|typographic|swiss)\b/i, "swiss-type"],
+  [/\b(bold|loud|eye-?catching|punchy)\b/i, "bold-stack"],
+  [/\b(photo|picture|image)[- ](?:background|based|led)\b|\bfull[- ]?(?:photo|picture)\b/i, "photo-overlay"],
+  [/\b(corporate|professional|business-?like|editorial)\b/i, "editorial-split"],
+  [/\b(geometric|brochure|circles?|modern shapes)\b/i, "geometric-split"],
+];
+
+/**
+ * Colours and layout the owner asked for ("use black and gold", "colours: navy and
+ * orange", "#00A86B", "a minimal design"). Colour words only count in a colour context,
+ * so "green maize seedlings" isn't a colour request.
+ */
+function requestedStyle(prompt: string): { colors: string[]; layouts: ArchetypeId[] } {
+  const colors: string[] = [];
+  for (const hex of prompt.match(/#[0-9a-f]{6}\b/gi) ?? []) colors.push(normalizeHex(hex));
+  const names = Object.keys(COLOR_WORDS).sort((a, b) => b.length - a.length).join("|");
+  const context = new RegExp(`\\b(?:colou?rs?|colou?r scheme|theme|palette|brand(?:ing)?|use|using|in)\\s*(?::|of|is|are)?\\s*((?:(?:${names})(?:\\s*(?:,|&|and|with)\\s*)?){1,3})(?=\\s|[.,;]|$)`, "gi");
+  // …and colours named first: "black and gold colours", "a red and white theme".
+  const trailing = new RegExp(`\\b((?:(?:${names})(?:\\s*(?:,|&|and|with)\\s*)?){1,3})\\s+(?:colou?rs?|colou?r scheme|theme|palette|branding)\\b`, "gi");
+  for (const match of [...prompt.matchAll(context), ...prompt.matchAll(trailing)].sort((a, b) => a.index - b.index)) {
+    for (const word of match[1]!.toLowerCase().match(new RegExp(`${names}`, "g")) ?? []) colors.push(COLOR_WORDS[word]!);
+  }
+  // A layout word counts only in the clause that asks for a layout: "minimal design" yes,
+  // "compliance made simple" no.
+  const layoutClauses = prompt.split(/,(?!\d)|;|\.\s/).filter((clause) => /\b(layout|design|style|look)\b/i.test(clause));
+  const layouts = LAYOUT_WORDS.filter(([pattern]) => layoutClauses.some((clause) => pattern.test(clause))).map(([, id]) => id);
+  return { colors: [...new Set(colors)].slice(0, 2), layouts };
+}
+
+/**
+ * The prompt without its design instructions ("use black and gold", "minimal design",
+ * "brand colour #00A86B"): those steer the design and must never be printed as copy.
+ */
+export function withoutStyleRequests(prompt: string) {
+  const colorWords = Object.keys(COLOR_WORDS).join("|");
+  const isRequest = (clause: string) =>
+    /#[0-9a-f]{6}\b|\b(?:colou?rs?|colou?r scheme|theme|palette|brand(?:ing)? colou?rs?)\b/i.test(clause) ||
+    new RegExp(`\\b(?:use|using|in)\\s+(?:${colorWords})\\b`, "i").test(clause) ||
+    (/\b(?:layout|design|style|look)\b/i.test(clause) && LAYOUT_WORDS.some(([pattern]) => pattern.test(clause)));
+  // A clause comma is followed by a space; a thousands comma by a digit ("US$1,200").
+  return prompt
+    .split(/,(?!\d)|;/)
+    .filter((clause) => !isRequest(clause))
+    .join(",")
+    .trim();
+}
+
 export function rulesBrief(prompt: string): DesignBrief {
+  const requested = requestedStyle(prompt);
   const intent = classifyIntent(prompt);
   const category: Category = classifyCategory(prompt) ?? (intent === "real_estate" ? "real_estate" : intent);
-  const contact = extractContact(prompt);
+  const contact = extractContact(withoutStyleRequests(prompt));
   const copy = extractCopy(contact.rest || prompt, intent);
   const defaults = CATEGORY_DEFAULTS[category];
   // US$ / $ / € / £ and ZiG, with thousands separators: "US$1,200", "ZiG 31,000".
@@ -343,9 +403,25 @@ export function rulesBrief(prompt: string): DesignBrief {
   ].filter((d): d is { icon: IconName; text: string } => Boolean(d));
   // One or two clauses make a subhead; the rest become their own detail rows rather than
   // a long line the layout would have to cut off with "…".
-  const clauses = withoutLogistics(copy.details, [day, date, time, price].filter((t): t is string => Boolean(t)))
+  let clauses = withoutLogistics(copy.details, [day, date, time, price].filter((t): t is string => Boolean(t)))
     .split("  ·  ")
     .filter(Boolean);
+  // "… in Harare: VAT returns, payroll, annual statements" — a colon introduces a list of
+  // services or items: short clauses after it become bullets, the lead stays the subhead.
+  const bullets: string[] = [];
+  const listAt = clauses.findIndex((clause) => /:\s*\S/.test(clause));
+  if (listAt >= 0) {
+    const [lead, first] = clauses[listAt]!.split(/:\s*/, 2) as [string, string];
+    const items = [first];
+    for (const clause of clauses.slice(listAt + 1)) {
+      if (clause.split(/\s+/).length > 5) break;
+      items.push(clause);
+    }
+    if (items.length >= 2) {
+      bullets.push(...items.slice(0, 5).map(sentenceCase));
+      clauses = [...clauses.slice(0, listAt), lead, ...clauses.slice(listAt + items.length)];
+    }
+  }
   const keep = clauses.length > 1 && clauses[0]!.length + clauses[1]!.length < 56 ? 2 : 1;
   const subhead = clauses.slice(0, keep).join("  ·  ");
   for (const clause of clauses.slice(keep)) {
@@ -365,18 +441,20 @@ export function rulesBrief(prompt: string): DesignBrief {
       subhead: subhead || null,
       bodyTitle: null,
       body: null,
-      bullets: [],
+      bullets,
       features: [],
       details,
       cta: contact.whatsapp ? "WhatsApp us" : CATEGORY_CTA[category],
       contact: { phone: contact.phone, email: contact.email, website: contact.website, address: null, social: [] },
     },
-    layouts: defaults.layouts,
+    // A layout the owner asked for comes first; the category's choices follow.
+    layouts: [...new Set([...requested.layouts, ...defaults.layouts])],
     palettes: defaults.palettes,
     pairings: defaults.pairings,
     decor: defaults.decor,
     motifs: defaults.motifs,
-    brandColor: null,
+    brandColor: requested.colors[0] ?? null,
+    accentColor: requested.colors[1] ?? null,
     photoQueries: rulesPhotoQueries(prompt, category),
   };
 }
@@ -400,7 +478,7 @@ function withoutLogistics(line: string, tokens: string[]) {
       rest = rest.replace(/§/g, " ");
       rest = rest.replace(/\s+/g, " ").replace(/^[\s,–-]+|[\s,–-]+$/g, "");
       if (!/\p{L}{2,}/u.test(rest.replace(LOGISTICS_FILLER, ""))) return "";
-      return rest.charAt(0).toUpperCase() + rest.slice(1);
+      return sentenceCase(rest);
     })
     .filter(Boolean)
     .join("  ·  ");
@@ -464,7 +542,8 @@ const SUBJECT_PHOTOS: [RegExp, string][] = [
 ];
 
 export function rulesPhotoQueries(prompt: string, category: Category): string[] {
-  const known = SUBJECT_PHOTOS.filter(([pattern]) => pattern.test(prompt)).map(([, subject]) => subject);
+  const hero = inferHero(prompt);
+  const known = [...(hero ? [hero.subject] : []), ...SUBJECT_PHOTOS.filter(([pattern]) => pattern.test(prompt)).map(([, subject]) => subject)];
   if (known.length) return [...new Set(known)].slice(0, 3);
   const words = prompt
     .replace(/[$€£]\s?\d+(?:[.,]\d+)?/g, " ")
@@ -477,4 +556,9 @@ export function rulesPhotoQueries(prompt: string, category: Category): string[] 
     .slice(0, 3)
     .join(" ");
   return [subject, CATEGORY_PHOTO_QUERY[category]].filter(Boolean);
+}
+
+/** First letter up, unless the first word has its own casing ("iPhone repairs", "eBay"). */
+function sentenceCase(text: string) {
+  return /^\p{Ll}+\p{Lu}/u.test(text) ? text : text.charAt(0).toUpperCase() + text.slice(1);
 }

@@ -56,7 +56,8 @@ function titleCase(text: string) {
     .map((word, index) =>
       index > 0 && SMALL_WORDS.has(word.toLowerCase())
         ? word.toLowerCase()
-        : /[A-Z]{2,}|\d/.test(word)
+        : // Acronyms, numbers and brand casing (FixIt, iPhone, eBay) stay as written.
+          /[A-Z]{2,}|\d|.\p{Lu}/u.test(word)
           ? word
           : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
     )

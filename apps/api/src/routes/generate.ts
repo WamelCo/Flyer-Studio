@@ -4,6 +4,7 @@ import type { FlyerDoc } from "@flyer/core/canvas/types";
 import { ARCHETYPES } from "@flyer/core/design/archetypes";
 import { storedIntent, type DesignBrief } from "@flyer/core/design/brief";
 import type { Variant } from "@flyer/core/design/compose";
+import type { ReferenceStyle } from "@flyer/core/design/reference";
 import { DirectorRefusal } from "@flyer/core/design/director";
 import { PALETTES } from "@flyer/core/design/palettes";
 import { placedPhotos, trackDownloads } from "@flyer/core/design/photos";
@@ -16,13 +17,16 @@ import { z } from "zod";
 
 import { designFlyers, renderMeta, VARIATIONS } from "../design-pipeline";
 import { ApiException, parseJson, uuidParam, type AppEnv } from "../http";
-import { putObject, publicUrl } from "../r2";
+import { putObject, publicUrl, publicUrlPrefix } from "../r2";
+import { analyseReference } from "../reference";
 import { collectRender, renderedDoc, renderingEnabled, startDesignRender } from "../render";
 import { requireUser } from "../session";
 
 const Body = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_LENGTH * 2),
   format: z.enum(["poster", "square", "story", "landscape"]),
+  /** A reference image the user uploaded (POST /api/uploads kind "reference"): its style is followed. */
+  referenceUrl: z.string().url().max(2048).optional(),
 });
 
 const RenderBody = z.object({ variant: z.number().int().min(0).max(VARIATIONS - 1) });
@@ -38,6 +42,8 @@ interface StoredVariations {
   photos: string[][];
   /** The engine designs, with paintable frames — the renderer's input. */
   designs?: FlyerDoc[];
+  /** The reference image and the style taken from it. */
+  reference?: { url: string; style: ReferenceStyle };
   /** Renders by variant index: started, delivered or failed. */
   renders?: Record<string, StoredRender>;
 }
@@ -85,14 +91,24 @@ export const generate = new Hono<AppEnv>()
     }
 
     try {
-      const { brief, source, model, copy, variants, designs, docs, photoSets, renderable } = await designFlyers(prompt, body.format);
+      // A reference must be the user's own upload; its style is read before designing.
+      let reference: StoredVariations["reference"];
+      if (body.referenceUrl) {
+        if (!body.referenceUrl.startsWith(`${publicUrlPrefix()}${user.id}/references/`)) {
+          throw new ApiException("VALIDATION_ERROR", "Upload the reference image to Flyer Studio first.");
+        }
+        const response = await fetch(body.referenceUrl, { signal: AbortSignal.timeout(20_000) }).catch(() => null);
+        const style = response?.ok ? await analyseReference(new Uint8Array(await response.arrayBuffer())) : null;
+        if (style) reference = { url: body.referenceUrl, style };
+      }
+      const { brief, source, model, copy, variants, designs, docs, photoSets, renderable } = await designFlyers(prompt, body.format, { reference: reference?.style });
 
       // Unsplash counts a photo as used when it lands in a design the user keeps. The first
       // direction becomes the project now; the client reports another one if it is opened.
       const photoDownloads = docs.map((doc, i) => placedPhotos(doc, photoSets[i] ?? []).map((photo) => photo.downloadLocation));
       trackDownloads(photoDownloads[0]!.map((downloadLocation) => ({ downloadLocation })));
 
-      const variations: StoredVariations = { source, model, brief, variants, photos: photoSets.map((set) => set.map((p) => p.url)), designs };
+      const variations: StoredVariations = { source, model, brief, variants, photos: photoSets.map((set) => set.map((p) => p.url)), designs, ...(reference && { reference }) };
 
       const project = await prisma.$transaction(async (tx) => {
         await tx.generationJob.create({
@@ -186,7 +202,7 @@ export const generate = new Hono<AppEnv>()
 
     let generationId: string;
     try {
-      ({ generationId } = await startDesignRender(design, renderMeta(job.stored.brief, chosen)));
+      ({ generationId } = await startDesignRender(design, renderMeta(job.stored.brief, chosen, job.prompt, job.stored.reference?.style)));
     } catch (error) {
       if (cost > 0) balance = await addCredits({ userId: user.id, amount: cost, reason: "refund:render", idempotencyKey: `refund:${chargeKey}` });
       await logRenderFailure(user.id, jobId, job.prompt, variant, error instanceof Error ? error.message : String(error));

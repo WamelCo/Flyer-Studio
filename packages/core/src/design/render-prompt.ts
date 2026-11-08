@@ -2,6 +2,8 @@ import { FORMATS } from "../canvas/formats";
 import type { FlyerDoc, FlyerFormat, FlyerNode, FontKey, ImageNode, PathNode, ShapeNode, TextNode } from "../canvas/types";
 import { ARCHETYPES, type ArchetypeId } from "./archetypes";
 import { hexToRgb, isHex } from "./color";
+import type { HeroSubject } from "./imagery";
+import type { ReferenceStyle } from "./reference";
 import { measure } from "./metrics";
 import type { Palette } from "./palettes";
 import { PRINCIPLE_IDS, principleCues } from "./principles";
@@ -59,6 +61,14 @@ export interface RenderMeta {
   negativeSpace?: "prose" | "boxes";
   /** Where the flyer will be used ("Zimbabwe"): photos show local places and people. */
   region?: string;
+  /**
+   * The hero image (imagery.ts inferHero): what the largest photo frame shows and how —
+   * a background-removed cutout or a framed photo. Layouts without photo frames get the
+   * hero as a cutout on their largest shape or in their largest empty area.
+   */
+  hero?: HeroSubject;
+  /** A reference image's style (reference.ts): its look and measured colours, never its content. */
+  reference?: ReferenceStyle;
 }
 
 /** Ideogram 4.5 only accepts its preset sizes; each format renders at the nearest one. */
@@ -345,7 +355,12 @@ function describeShape(node: ShapeNode, doc: FlyerDoc): string {
     : opaque(node.fill)
       ? `solid flat ${paint(node.fill)}`
       : "unfilled";
-  const named = SHAPE_NAME[node.name];
+  // A ring only "wraps the portrait" when it actually surrounds a photo; decorative rings
+  // elsewhere described that way get a second portrait painted inside them.
+  const aroundPhoto =
+    node.name === "Ring" &&
+    doc.nodes.some((other) => other.type === "image" && !other.hidden && Boolean(intersectBox(nodeBox(other), nodeBox(node))) && !coversPage(doc, nodeBox(other)));
+  const named = node.name === "Ring" && !aroundPhoto ? "thick decorative ring arc (empty inside: no photo or person)" : SHAPE_NAME[node.name];
   const parts = [
     node.name === "Scrim" ? "dark legibility scrim over the photo" : null,
     `${fillText} ${named ?? kind}`,
@@ -394,6 +409,17 @@ function describePath(node: PathNode, onShape = false): string {
   const color = node.fill ?? node.stroke?.color ?? "#000000";
   const what = node.icon ? `simple ${node.stroke ? "line" : "solid"} icon: ${node.icon.replace(/-/g, " ")}` : (PATH_DESC[node.name] ?? "small flat vector ornament");
   return `${what}, ${paint(color)}${node.rotation ? `, rotated ${Math.round(node.rotation)}°` : ""}${onShape ? ", centred on the chip behind it" : ", drawn directly on the background with no tile or box behind it"}.`;
+}
+
+/** A hero cutout: the subject with its background removed, overlapping the layout for depth. */
+function describeCutout(hero: HeroSubject, subject: string, host: string | null): string {
+  return [
+    `Hero cut-out photograph of ${subject}, background completely removed (clean transparent-PNG cutout, no frame, no border, no box, no photo or scene behind it)`,
+    "standing directly on the flyer's own background, unlike any framed photos beside it",
+    host ? `overlapping ${host}` : "overlapping the shapes behind it",
+    hero.kind === "person" ? "natural friendly smile, looking at the viewer, crisp edge around hair and shoulders" : "the product sharp and clearly recognisable, every detail visible",
+    "soft natural drop shadow for depth; the main focal image of the flyer.",
+  ].join(", ");
 }
 
 function describeImage(node: ImageNode, photo: string): string {
@@ -446,7 +472,9 @@ export function compileRenderPrompt(doc: FlyerDoc, meta: RenderMeta): IdeogramPr
   const toBox = frameMapper(doc, render);
   const area = doc.width * doc.height;
   const palette = meta.palette;
-  const photos = meta.photoPrompts ?? [];
+  // The hero frame paints the hero; the others need other subjects, or every frame in a
+  // collage repeats the same person.
+  const photos = (meta.photoPrompts ?? []).filter((prompt) => !meta.hero || prompt !== meta.hero.subject);
   let photoIndex = 0;
 
   const background: string[] = [`Flat solid ${paint(doc.background)} page`];
@@ -460,6 +488,11 @@ export function compileRenderPrompt(doc: FlyerDoc, meta: RenderMeta): IdeogramPr
   for (const node of visible) if (node.type !== "text" && node.type !== "image") counts.set(node.name, (counts.get(node.name) ?? 0) + 1);
   const grouped = new Map<string, FlyerNode[]>();
 
+  const frames = visible.filter((n): n is ImageNode => n.type === "image" && !coversPage(doc, nodeBox(n)));
+  const heroFrame = meta.hero ? frames.reduce<ImageNode | null>((best, n) => (!best || n.width * n.height > best.width * best.height ? n : best), null) : null;
+  // A single person, named as a local — "with local people" invites a crowd behind a cutout.
+  const local = (text: string) => (meta.region ? `${text}, a local person from ${meta.region}` : text);
+
   visible.forEach((node, index) => {
     const box = nodeBox(node);
     if (node.type !== "text" && node.type !== "image" && (counts.get(node.name) ?? 0) >= 3 && GROUP_DESC[node.name]) {
@@ -468,7 +501,10 @@ export function compileRenderPrompt(doc: FlyerDoc, meta: RenderMeta): IdeogramPr
     }
 
     if (node.type === "image") {
-      const subjectText = photos[photoIndex++ % Math.max(1, photos.length)] ?? `a scene that fits ${meta.subject}`;
+      const subjectText =
+        (coversPage(doc, box) && meta.hero?.treatment === "framed" ? meta.hero.subject : null) ??
+        photos[photoIndex++ % Math.max(1, photos.length)] ??
+        `a scene that fits ${meta.subject}`;
       // The audience should see themselves: photos are set in the flyer's market.
       const subject = meta.region ? `${subjectText}, photographed in ${meta.region} with local people` : subjectText;
       if (coversPage(doc, box)) {
@@ -482,7 +518,19 @@ export function compileRenderPrompt(doc: FlyerDoc, meta: RenderMeta): IdeogramPr
         return;
       }
       occupied.push(box);
-      ranked.push({ element: { type: "obj", bbox: toBox(box), desc: describeImage(node, subject) }, weight: 800 + (node.width * node.height) / area, optional: false });
+      if (node === heroFrame && meta.hero) {
+        // The hero frame shows the inferred subject; a cutout drops the frame for depth.
+        const heroSubject = meta.hero.kind === "person" ? local(meta.hero.subject) : meta.hero.subject;
+        // A cutout only reads as one when the hero is the layout's only photo: beside other
+        // framed prints (a fan of photos) the model frames it too, so it keeps its frame.
+        const cutout = meta.hero.treatment === "cutout" && frames.length === 1;
+        const desc = cutout ? describeCutout(meta.hero, heroSubject, null) : describeImage(node, heroSubject);
+        ranked.push({ element: { type: "obj", bbox: toBox(box), desc }, weight: 900, optional: false });
+        return;
+      }
+      // Beside a hero, a supporting photo shows a different moment, people and setting.
+      const supporting = heroFrame ? `${subject} — a different scene, people and setting from the main photo` : subject;
+      ranked.push({ element: { type: "obj", bbox: toBox(box), desc: describeImage(node, supporting) }, weight: 800 + (node.width * node.height) / area, optional: false });
       return;
     }
 
@@ -562,8 +610,39 @@ export function compileRenderPrompt(doc: FlyerDoc, meta: RenderMeta): IdeogramPr
   // photo backdrop they are skipped entirely (they turn one photo into a collage) and the
   // backdrop element itself insists on one continuous image. Boxes for empty space get drawn as
   // outlined panels, so by default the zones are named in the background prose instead.
+  const regions = emptyRegions(doc, occupied);
+  const hasBackdrop = ranked.some((r) => r.weight === 5000);
+  if (meta.hero && frames.length === 0 && !hasBackdrop) {
+    const host = visible
+      .filter((n): n is ShapeNode => n.type === "shape" && (n.name === "Disc" || n.name === "Colour circle" || n.name === "Colour card"))
+      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    const pageBox = { x: 0, y: 0, width: doc.width, height: doc.height };
+    // A hero needs room: the visible part of the host shape, or the largest empty area if
+    // that's bigger (a disc bleeding off a corner can leave only a sliver on the page).
+    const onHost = host ? intersectBox(nodeBox(host), pageBox) : undefined;
+    const sizeOf = (box?: Box) => (box ? box.width * box.height : 0);
+    const useHost = Boolean(onHost) && sizeOf(onHost) >= sizeOf(regions[0]) * 0.6;
+    let spot = useHost ? onHost : regions.shift();
+    // Grow a small host spot into the open space right next to it, so the hero reads as
+    // the focal image rather than a sticker in a corner.
+    if (useHost && spot && sizeOf(spot) < doc.width * doc.height * 0.12) {
+      const reach = Math.min(doc.width, doc.height) * 0.05;
+      for (let i = regions.length - 1; i >= 0; i--) {
+        if (gap(regions[i]!, spot) <= reach) {
+          spot = union([spot, regions[i]!]);
+          regions.splice(i, 1);
+        }
+      }
+    }
+    if (spot) {
+      const heroSubject = meta.hero.kind === "person" ? local(meta.hero.subject) : meta.hero.subject;
+      const hostName = useHost && host ? `the ${colorName(fillOf(host) ?? doc.background)} ${host.name === "Disc" ? "disc" : "shape"}` : null;
+      ranked.push({ element: { type: "obj", bbox: toBox(inset(spot, 0.08)), desc: describeCutout({ ...meta.hero, treatment: "cutout" }, heroSubject, hostName) }, weight: 900, optional: false });
+    }
+  }
+
   const emptyZones: string[] = [];
-  for (const region of emptyRegions(doc, occupied)) {
+  for (const region of regions) {
     const surface = surfaceAt(visible, doc, region);
     if (surface.includes("photograph")) continue;
     if (meta.negativeSpace === "boxes") {
@@ -602,15 +681,18 @@ export function compileRenderPrompt(doc: FlyerDoc, meta: RenderMeta): IdeogramPr
       ? `A professionally designed ${formatSpec.label.toLowerCase()} flyer (${formatSpec.detail}) for ${meta.subject}${headline ? `, headlined "${headline}"` : ""}: one continuous atmospheric full-bleed photograph with a centred typographic lockup over it, precise typography and generous breathing room. Only the listed text appears; the photograph shows through everywhere else.`
       : `A professionally designed ${formatSpec.label.toLowerCase()} flyer (${formatSpec.detail}) for ${meta.subject}${headline ? `, headlined "${headline}"` : ""}: a clean, flat, print-ready graphic design layout in the ${archetype.name.toLowerCase()} style, with precise typography, crisp geometric shapes and a strict grid. Only the listed text appears; empty areas stay empty.`,
     style_description: {
-      aesthetics: [palette.mood, ...(meta.tone ?? [])].join(", ") + `. ${palette.psychology}`,
+      aesthetics: meta.reference?.aesthetics
+        ? `${meta.reference.aesthetics}${meta.tone?.length ? `; ${meta.tone.join(", ")}` : ""}`
+        : [palette.mood, ...(meta.tone ?? [])].join(", ") + `. ${palette.psychology}`,
       lighting: "Flat, even print lighting; no dramatic lighting, glow, lens flare, bokeh or 3D shading on the graphic elements.",
       medium: "graphic design — professional print flyer, vector layout",
       // Principles apply per layout: over a photo backdrop a designer drops the grid and
       // photo frames (they invite collages) and lets one image carry the mood.
-      art_style: backdrop
+      art_style: (meta.reference?.artStyle ? `Match the reference design's visual style: ${meta.reference.artStyle}${meta.reference.medium ? `, ${meta.reference.medium}` : ""}. ` : "") + (backdrop
         ? `Contemporary professional photo poster, ${meta.pairing.mood.toLowerCase()} type voice; ${principleCues(PRINCIPLE_IDS.filter((id) => id !== "grid" && id !== "imagery")).join("; ")}. Typography and thin graphic accents over one photograph: no collage, no inset photos, no panels or frames, not a mockup.`
-        : `Contemporary professional flyer, ${meta.pairing.mood.toLowerCase()} type voice; ${principleCues().join("; ")}. Flat vector graphic design: not a painting, not 3D, not a mockup, no paper texture, no perspective.`,
-      color_palette: colors,
+        : `Contemporary professional flyer, ${meta.pairing.mood.toLowerCase()} type voice; ${principleCues().join("; ")}. Flat vector graphic design: not a painting, not 3D, not a mockup, no paper texture, no perspective.`),
+      // A reference's measured colours lead the palette; our roles follow.
+      color_palette: meta.reference ? [...new Set([...meta.reference.palette, ...colors])].slice(0, 16) : colors,
     },
     compositional_deconstruction: {
       background: `${background.join(", ")}. Any area without a listed element shows only this background: no other text, words, sections, icons, photos, shapes or textures.`,
@@ -699,6 +781,21 @@ function surfaceAt(nodes: FlyerNode[], doc: FlyerDoc, region: Box) {
     if (isHex(node.fill)) return `plain ${colorName(node.fill)} background`;
   }
   return `plain ${colorName(doc.background)} background`;
+}
+
+function intersectBox(a: Box, b: Box): Box | undefined {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : undefined;
+}
+
+/** Shrink a box by a share of its size on every side (breathing room inside a host shape). */
+function inset(box: Box, share: number): Box {
+  const dx = box.width * share;
+  const dy = box.height * share;
+  return { x: box.x + dx, y: box.y + dy, width: box.width - 2 * dx, height: box.height - 2 * dy };
 }
 
 /** Single-link clustering: boxes closer than `reach` (edge to edge) share a cluster. */

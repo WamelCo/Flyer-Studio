@@ -313,6 +313,7 @@ export function coerceBrief(raw: unknown): unknown {
     decor: (DECOR_LEVELS as readonly string[]).includes(slug(r.decor)) ? slug(r.decor) : "balanced",
     motifs: pickIds(r.motifs, MOTIF_IDS).slice(0, 3),
     brandColor: isHex(asText(r.brandColor)) ? asText(r.brandColor) : null,
+    accentColor: isHex(asText(r.accentColor)) ? asText(r.accentColor) : null,
     photoQueries: asTextList(r.photoQueries).slice(0, 3),
   };
 }

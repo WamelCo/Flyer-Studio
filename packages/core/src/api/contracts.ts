@@ -87,7 +87,7 @@ export interface BillingSummary {
   ledger: LedgerEntry[];
 }
 
-export type UploadKind = "image" | "thumbnail";
+export type UploadKind = "image" | "thumbnail" | "reference";
 
 /** POST /api/uploads — a presigned slot in the public flyers bucket. */
 export interface UploadSlot {
@@ -122,3 +122,27 @@ export interface RenderResponse {
 export type RenderStatus =
   | { status: "pending"; startedAt: string; charged: number; balance: number }
   | ({ status: "done" } & RenderResponse);
+
+/**
+ * One revision of a rendered flyer (POST /api/projects/:id/revisions starts it, GET
+ * …/revisions/:revisionId polls it). `targets` names the elements the edit was confined
+ * to; empty means the instruction named none, so the whole image could change.
+ */
+export interface RevisionSummary {
+  id: string;
+  instruction: string;
+  status: "pending" | "done" | "failed";
+  targets: string[];
+  sourceUrl: string;
+  resultUrl: string | null;
+  charged: number;
+  createdAt: string;
+}
+
+export type RevisionStatus =
+  | ({ status: "pending" } & RevisionSummary & { balance: number })
+  | ({ status: "done" } & RevisionSummary & { doc: FlyerDoc; balance: number });
+
+export interface RevisionListResponse {
+  revisions: RevisionSummary[];
+}

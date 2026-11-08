@@ -89,5 +89,24 @@ Never ask an image model to "make a flyer" from the user's prompt.
   - Photos inside frames: "no legible text, signs or logos" (otherwise garbled signage appears).
 - Iterate with `pnpm render:try -- --fixture <name>` or `--prompt "<text>" --variant 0|1|2` (add `--dry`
   for a free price quote). Each real render costs $0.03 (low, default) / $0.06 (medium) / $0.10 (high).
+## Hero imagery, requested style, references
+- `imagery.ts` infers the hero (person or item, cut-out or framed) from the prompt: "cracked screen" → a phone
+  with a shattered screen. A cut-out (background removed, soft shadow) only when the hero is the layout's only
+  photo; beside other frames it stays framed. Frameless layouts stand it on the disc/colour card. Supporting
+  frames never repeat the hero subject. Add rules to `HERO_RULES`, most specific first.
+- Colours and layouts the owner asks for ("black and gold colours", "use navy", "minimal design") win over the
+  director's picks (`requestedStyle` in `brief.ts`) and are stripped from the copy (`withoutStyleRequests`).
+- A style reference (`reference.ts`) contributes colours measured from its pixels, its page tone (light pages keep
+  a light palette; Swiss, always a colour field, goes last) and its structure from Ideogram Describe ($0.01).
+  Never its people, products, names or words.
+
+## Revisions
+- `POST /api/projects/:id/revisions` → poll `GET …/revisions/:revisionId`; `POST …/:revisionId/undo` is free.
+  `revisionTargets` (`revision.ts`) maps the instruction to design elements (quoted text, price, phone number,
+  headline, button, brand, hero image); their boxes become the edit mask, so everything else is copied pixel for
+  pixel. Global asks ("warmer colours", "the background") are unmasked. "the phone in the photo" is the hero,
+  not the number. Costs `CREDIT_COSTS.revise`, refunded on failure or after 10 minutes.
+- Measure with `pnpm --filter @flyer/api revise:try`: it reports the share of pixels changed and how much of
+  that fell inside the targets (tested: 100% inside for price, button and hero edits).
 - Cheaper non-Ideogram models were A/B tested and rejected: they read the structured JSON as plain text
   (Nano Banana printed "-4°", Z-Image printed hex codes, GPT Image ignored the layout, P-Image garbled copy).

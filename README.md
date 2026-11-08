@@ -38,6 +38,10 @@ Optional:
   our structured prompts; `IDEOGRAM_QUALITY=medium|high` for $0.06 / $0.10). The first
   render of a generation is included in its credits; rendering another design from it costs
   `CREDIT_COSTS.render`. Try it with `pnpm render:try -- --fixture health`.
+  Rendered flyers can be **revised** in words (`POST /api/projects/:id/revisions`): a precise edit masked to the
+  elements the instruction names, so nothing else moves ($0.03 per revision at `IDEOGRAM_EDIT_QUALITY=low`).
+  Users can also attach a **style reference** image: its colours, page tone and layout structure are followed
+  (never its content). Try revisions with `pnpm --filter @flyer/api revise:try -- --image render.png --design design.json "<instruction>" …`.
 - **Stripe (test mode)**: put `STRIPE_SECRET_KEY` (sk_test_…) and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (pk_test_…)
   in `.env`, then run `pnpm stripe:setup`. It creates the Pro and Max products, prices and a Customer Portal
   configuration and writes the IDs into `.env`. Then, next to `pnpm dev`, run `pnpm stripe:webhooks` to deliver

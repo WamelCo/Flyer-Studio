@@ -45,13 +45,14 @@ interface ComposeInput {
   /** Decorative motifs placed in the layout's free space, behind the type. */
   decor?: Decor;
   brandColor?: string | null;
+  accentColor?: string | null;
 }
 
-export function composeDesign({ format, copy, variant, photos, decor, brandColor }: ComposeInput): FlyerDoc {
+export function composeDesign({ format, copy, variant, photos, decor, brandColor, accentColor }: ComposeInput): FlyerDoc {
   const archetype = ARCHETYPES[variant.archetype];
   const ctx = createCtx({
     format,
-    palette: withBrandColor(PALETTES[variant.palette], brandColor),
+    palette: withBrandColor(PALETTES[variant.palette], brandColor, accentColor),
     type: PAIRINGS[variant.pairing],
     copy,
     photos: archetype.photos === 0 ? [] : photos,
