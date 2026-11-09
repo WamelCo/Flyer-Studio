@@ -1,0 +1,64 @@
+{
+  "calligraphy": {
+    "400": "GreatVibes-Regular"
+  },
+  "condensed": {
+    "300": "Oswald-Light",
+    "400": "Oswald-Regular",
+    "500": "Oswald-Medium",
+    "600": "Oswald-SemiBold",
+    "700": "Oswald-Bold"
+  },
+  "display": {
+    "400": "BebasNeue-Regular"
+  },
+  "dserif": {
+    "400": "DMSerifDisplay-Regular"
+  },
+  "elegant": {
+    "400": "CormorantGaramond-Regular",
+    "500": "CormorantGaramond-Medium",
+    "600": "CormorantGaramond-SemiBold",
+    "700": "CormorantGaramond-Bold",
+    "400i": "CormorantGaramond-Italic",
+    "500i": "CormorantGaramond-MediumItalic",
+    "600i": "CormorantGaramond-SemiBoldItalic"
+  },
+  "geometric": {
+    "400": "Montserrat-Regular",
+    "500": "Montserrat-Medium",
+    "600": "Montserrat-SemiBold",
+    "700": "Montserrat-Bold",
+    "800": "Montserrat-ExtraBold",
+    "900": "Montserrat-Black"
+  },
+  "grotesk": {
+    "400": "SpaceGrotesk-Regular",
+    "500": "SpaceGrotesk-Medium",
+    "600": "SpaceGrotesk-SemiBold",
+    "700": "SpaceGrotesk-Bold"
+  },
+  "heavy": {
+    "400": "Anton-Regular"
+  },
+  "sans": {
+    "400": "Inter-Regular",
+    "500": "Inter-Medium",
+    "600": "Inter-SemiBold",
+    "700": "Inter-Bold",
+    "800": "Inter-ExtraBold"
+  },
+  "script": {
+    "400": "Caveat-Regular",
+    "600": "Caveat-SemiBold",
+    "700": "Caveat-Bold"
+  },
+  "serif": {
+    "400": "PlayfairDisplay-Regular",
+    "600": "PlayfairDisplay-SemiBold",
+    "700": "PlayfairDisplay-Bold",
+    "900": "PlayfairDisplay-Black",
+    "400i": "PlayfairDisplay-Italic",
+    "700i": "PlayfairDisplay-BoldItalic"
+  }
+}

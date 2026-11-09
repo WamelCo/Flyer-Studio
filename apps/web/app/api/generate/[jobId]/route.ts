@@ -1,0 +1,35 @@
+import { NextResponse } from "next/server";
+
+import type { GenerateResponse, GenerationStatus } from "@/lib/api/contracts";
+import type { ApiErrorCode } from "@/lib/api/types";
+import { ApiException, handle, requireUser } from "@/lib/api/server";
+import { and, db, eq, generationJobs, getBalance } from "@flyer/db";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/** A generation job's progress, scoped to the caller. */
+export const GET = handle(async (_request: Request, { params }: RouteContext<"/api/generate/[jobId]">) => {
+  const user = await requireUser();
+  const { jobId } = await params;
+  if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new ApiException("NOT_FOUND", "That generation doesn't exist.");
+
+  const [job] = await db()
+    .select({ status: generationJobs.status, stage: generationJobs.stage, result: generationJobs.result, error_code: generationJobs.errorCode, error_message: generationJobs.errorMessage })
+    .from(generationJobs)
+    .where(and(eq(generationJobs.id, jobId), eq(generationJobs.userId, user.id)))
+    .limit(1);
+  if (!job) throw new ApiException("NOT_FOUND", "That generation doesn't exist.");
+
+  const row = job as { status: GenerationStatus["status"]; stage: string | null; result: GenerateResponse | null; error_code: string | null; error_message: string | null };
+  const status: GenerationStatus = { status: row.status, stage: row.stage };
+  if (row.status === "succeeded" && row.result) status.result = row.result;
+  if (row.status === "failed") {
+    status.error = {
+      code: (row.error_code as ApiErrorCode | null) ?? "GENERATION_FAILED",
+      message: row.error_message ?? "We couldn't design this flyer. Your credits were returned — please try again.",
+    };
+    status.balance = await getBalance(user.id);
+  }
+  return NextResponse.json(status, { headers: { "Cache-Control": "no-store" } });
+});

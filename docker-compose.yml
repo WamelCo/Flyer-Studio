@@ -1,0 +1,40 @@
+# Flyer Studio runs as ONE container: web app + WhatsApp service + Postgres (Dockerfile).
+#
+#   cp .env.example .env          fill in at least NEXT_PUBLIC_SITE_URL and the STORAGE_* values
+#   docker compose up -d --build  then open http://localhost:3000
+#   docker compose logs -f        the first time, scan the WhatsApp QR code shown here
+#
+# Data (Postgres, the WhatsApp session, generated secrets) lives in the flyer-data volume.
+# To use a managed Postgres instead of the embedded one, set DATABASE_URL in .env.
+services:
+  flyer:
+    build:
+      context: .
+      # Baked into the web build (Next.js inlines NEXT_PUBLIC_*): rebuild after changing them.
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+        NEXT_PUBLIC_SUPPORT_EMAIL: ${NEXT_PUBLIC_SUPPORT_EMAIL:-}
+        NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: ${NEXT_PUBLIC_SENTRY_ENVIRONMENT:-}
+        NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-}
+    image: flyer-studio:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # The WhatsApp service listens inside the container; the port below maps it to this
+      # machine only, for the QR page: http://localhost:3001/qr?token=<WHATSAPP_ADMIN_TOKEN>
+      WHATSAPP_HOST: 0.0.0.0
+    ports:
+      - "${PORT:-3000}:3000"
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - flyer-data:/data
+    # Chromium (WhatsApp Web) needs more shared memory than Docker's 64 MB default.
+    shm_size: 1gb
+
+volumes:
+  flyer-data:

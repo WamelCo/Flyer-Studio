@@ -1,0 +1,35 @@
+{
+  "name": "@flyer/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test:director": "tsx scripts/test-director.mts",
+    "test:ideogram": "tsx scripts/test-ideogram.mts",
+    "test:design": "tsx scripts/test-design.mts",
+    "test": "tsx scripts/test-director.mts && tsx scripts/test-ideogram.mts && tsx scripts/test-design.mts",
+    "benchmark": "tsx scripts/benchmark.mts",
+    "director:try": "tsx --env-file=../../.env.local scripts/try-director.mts",
+    "ideogram:quote": "tsx --env-file=../../.env.local scripts/ideogram-quote.mts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@flyer/db": "workspace:*",
+    "@flyer/design": "workspace:*",
+    "@flyer/log": "workspace:*",
+    "@flyer/storage": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@flyer/tsconfig": "workspace:*",
+    "@types/node": "^26.6.6",
+    "typescript": "^5.9.3",
+    "@flyer/billing": "workspace:*",
+    "tsx": "^4.23.15",
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "extends": "@flyer/tsconfig/base.json",
+  "include": [
+    "src",
+    "scripts"
+  ]
+}

@@ -10,7 +10,7 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 | --- | --- |
 | Output is always editable layers | The #1 complaint about AI design tools is flat images with garbled, uneditable text. |
 | Ideogram lead + Layerize → editable, re-typed text | Ideogram-quality artwork with exact, correct copy — no tool we found combines both. |
-| Fact guard (`lib/design/facts.ts`) | AI tools routinely invent dates, prices and deadlines; ours can't reach the page. |
+| Fact guard (`packages/ai/src/facts.ts`) | AI tools routinely invent dates, prices and deadlines; ours can't reach the page. |
 | WCAG contrast audit on 12,960 designs | Legibility is guaranteed by test, not hoped for. |
 | Art director with a requirements checklist | Directly answers "the AI doesn't do what it's told". |
 | Free open model (Qwen on Groq) | Near-zero marginal cost per brief. |
@@ -43,8 +43,9 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 - **Rate limits and spend caps:** built in Postgres (`rate_limit_hit`) rather than Upstash, for the same reason.
 - **Moderation:** a safety verdict inside the art director's brief, not Llama Guard (it isn't served on our Groq account, and the free `gpt-oss-safeguard` tier allows only 2,000 tokens per minute).
 - **Security headers, Sentry and PostHog hooks (optional keys), structured logs, CI with Playwright smoke tests:** built.
-- **Transactional email and staging:** documented in `docs/DEPLOYMENT.md` (owner configures Supabase SMTP and a staging project).
-- **Verified live (Nov 7):** migration applied; background jobs, real stages over HTTP, rate limits, row-level security on jobs, and the pg_cron sweeper (failed and refunded a dead job in 28 s).
+- **Transactional email and staging:** sign-in codes go through Resend directly (Better Auth); staging is documented in `docs/DEPLOYMENT.md`.
+- **Platform (Nov 9):** Supabase replaced — a Turborepo monorepo on plain Postgres + Drizzle, Better Auth (email or WhatsApp codes), Cloudflare R2, deployed as one container (web + WhatsApp + Postgres). WhatsApp channel built (Hono + whatsapp-web.js): linked numbers, a free watermarked first flyer, passes via Paynow in the chat.
+- **Verified live (Nov 7, on Supabase):** migration applied; background jobs, real stages over HTTP, rate limits, row-level security on jobs, and the pg_cron sweeper (failed and refunded a dead job in 28 s).
 
 **Original plan:**
 
@@ -53,25 +54,39 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 | Generation as a background job | Inngest functions on our own Next.js routes: steps for direct → photos → Ideogram → compose → critique, each retried independently. The client gets a `jobId` at once and follows progress through Supabase Realtime on `generation_jobs` (`status`, `stage`). Removes the 120 s request and makes progress messages real. |
 | Rate limits & spend caps | Upstash Ratelimit per user and per IP on generate, photos, export and sign-in codes. Daily Ideogram spend cap (env) with an alert. |
 | Moderation before paid calls | Llama Guard 4 screens prompts (free endpoints exist) before any Ideogram spend; uploads screened later. |
-| Security headers | CSP (Stripe, Supabase, Unsplash, Ideogram), HSTS, frame-ancestors, Referrer-Policy, Permissions-Policy. |
+| Security headers | CSP (Supabase, Unsplash, Ideogram; Paynow is a redirect), HSTS, frame-ancestors, Referrer-Policy, Permissions-Policy. |
 | Observability | Sentry (errors, traces, source maps), structured logs with request IDs, PostHog (funnels, feature flags). |
 | CI | GitHub Actions: lint, typecheck, `test:director`, `test:ideogram`, `test:db`, `audit:contrast`, build; Playwright smoke tests. |
 | Email | Resend + React Email as Supabase's SMTP (deliverable sign-in codes) and for low-credit / export-ready mail. |
-| Environments | Staging Supabase project + Stripe test mode; migrations applied by CI. |
+| Environments | Staging Supabase project + a Paynow integration in test mode; migrations applied by CI. |
 
 **Done when:** p95 time to first design ≤ 20 s (engine) / ≤ 60 s (Ideogram); a week of beta with zero unhandled Sentry errors; every check runs in CI.
 
 ## Phase 1 — World-class design quality (2–4 weeks) — 🟡 milestone A built Nov 7, 2026
 
 **Status — milestone A (measure and self-correct):**
-- **Server rendering:** FlyerDoc → SVG → PNG with resvg and 40 OFL font files in `assets/fonts` (`lib/render/`), matching the canvas. A three-up sheet renders in ~65 ms.
-- **Design lint** (`lib/design/lint.ts`): cut-off or colliding type (line by line), tiny text, edge crowding, empty frames, weak hierarchy. Lint errors trigger a layout swap.
+- **Server rendering:** FlyerDoc → SVG → PNG with resvg and 40 OFL font files in `packages/design/assets/fonts` (`packages/design/src/render/`), matching the canvas. A three-up sheet renders in ~65 ms.
+- **Design lint** (`packages/design/src/lint.ts`): cut-off or colliding type (line by line), tiny text, edge crowding, empty frames, weak hierarchy. Lint errors trigger a layout swap.
 - **Benchmark:** 100 prompts × every format = 1,200 designs in under a second; 0 lint errors, score 100/100. In CI (`pnpm benchmark`); `--render` writes contact sheets, `--live` uses the real art director.
 - **Critic + refine:** one wide contact sheet per review (~785 image tokens vs ~1,800 for one portrait). Fixes are applied, then each revision is **compared side by side with its original** — absolute re-scores drifted by up to 2.4 points on unchanged designs, more than a revision gains. Live result: a revision kept at 6.6 → 8.6, another rejected (original preferred 8 to 5).
 - **Found:** Groq's free tier allows Qwen only **1,000 output tokens per minute**; a brief uses ~650–700, so the art director and critic can't both run in one minute, and the whole site manages ~1 generation per minute. The critic skips gracefully. Fix: a separate critic provider (`CRITIC_*`), or Groq's paid Dev Tier for production — see decision 5.
-- **Found:** with no photos and a one-line message only 2 of 5 layouts are usable, so two directions share a layout — the layout milestone below fixes it (`pnpm test:design` pins the gap).
+- **Found (fixed in milestone B):** with no photos and a one-line message only 2 of 5 layouts were usable, so two directions shared a layout.
 
-**Next:** 5 → 15+ layouts, then typography, imagery, learning from use.
+**Status — milestone B (layout library), Nov 8, 2026:**
+- **5 → 15 layouts**, all on the same engine (`stack()`, fitted headlines, contrast-safe colour): minimal centre, diagonal split, ticket, big number, invitation, magazine cover, menu / price list, agenda, product hero, collage. Five work with no photo and a one-line message, so three directions always get three layouts.
+- Layouts declare what they need: `fits(copy)` (big number needs a real figure — never a phone number; menu and agenda need a list with prices or times as written) and `maxDecor` (minimal centre and invitation stay quiet whatever the brief asks).
+- Every category's defaults use the new layouts; the art director is told what each one needs.
+- **Gates:** every layout × short / event / rich copy × every format × with/without photos is lint-clean (`pnpm test:design`); the WCAG audit now checks 38,880 designs (straight-edged fields tested exactly, not by bounding box).
+- **Found and fixed:** three bundled fonts declare their family as e.g. "Montserrat Thin", so the server renderer — and therefore the AI critic — had been drawing Montserrat, Space Grotesk and Cormorant pairings in a fallback font. Fixed (`lib/render/font-families.json`), with a test per family. Also: ₦ and other extended-Latin characters rendered as boxes; the editor now loads the latin-ext subsets and the server has a Noto Sans fallback.
+- Declarative layout trees (the original approach) were not needed: new layouts are short functions on shared helpers.
+
+**Status — milestone C (designer techniques), Nov 9, 2026:** the owner's references (portrait windows, duotone triptychs, outlined type over B&W portraits, product rings) set the bar.
+- **Photo effects** in the model, the editor (Konva filters), the server renderer (SVG filters) and both designer exports: black and white, duotone, blur, dim, film grain; **photo windows** (`fitFrame`: a sharp strip lines up exactly with the same photo blurred full-page); **outline text**; **blend modes** (multiply, screen, overlay…, real PSD blend modes); **grain texture**; **horizontal gradients** for feathering photos into paper.
+- **4 designer layouts → 19 in all:** focus window, triptych (one subject, three crops), outline portrait (photo multiplied onto textured paper, feathered — reads like a cut-out), product arc. They carry their own detailing (crosshairs, hairline frames, rotated microtype, leader lines, signature script) and take no generated decoration.
+- The director is told to ask for close-up single-subject photos for them; categories lead with them.
+- **Decision needed — subject cut-outs:** 3 of the 6 references need real background removal (subject stepping out of panels, type behind the head, product cut-outs). Recommended: BiRefNet (MIT) on Replicate or fal, well under 1¢ per image; Photoroom API ~$0.02. A cut-out also gives a subject box, so crops can centre on faces.
+
+**Next:** cut-outs (after the decision), typography (more pairings, non-Latin scripts), imagery, learning from use.
 
 | Deliverable | Approach |
 | --- | --- |
@@ -100,6 +115,7 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 - **Print-grade PDF:** per-product bleed (3 mm / 0.125″), optional crop marks, 300 dpi images, subset-embedded fonts, CMYK via Ghostscript + ICC (FOGRA39 / GRACoL) → PDF/X-4, plus a preflight report (low-res images, text in the bleed).
 - **Order prints in-app:** Gelato API (flyers and posters, local production in 32 countries) — quote, order, track. Print margin becomes a revenue line.
 - **Share:** public view links and download kits; social scheduling later.
+- **Designer files — ✅ built Nov 8, 2026 (ahead of phase):** Photoshop PSD (one layer per element, live text layers, fonts by PostScript name, 2480 px) and Illustrator SVG (named objects, live text, A4 artboard), Pro and Max only. Native `.ai` is proprietary; Illustrator opens SVG directly.
 
 ## Phase 4 — Teams and brand (3–4 weeks)
 
@@ -107,11 +123,11 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 - Brand kits (logos, colours, fonts, voice) applied to every generation; brand controls that restrict designs to brand colours and fonts; lockable template elements.
 - Approvals: request review, approve or reject with comments, approval history CSV export (Canva Enterprise's headline feature).
 - Comments and mentions; real-time co-editing later (Liveblocks or Yjs).
-- Seat-based Team plan via Stripe quantities.
+- Seat-based Team plan (passes priced per seat through Paynow).
 
 ## Phase 5 — Enterprise (4–8 weeks, plus audit time)
 
-- **Identity:** SAML/OIDC SSO, SCIM provisioning and an admin portal via WorkOS, bridged to Supabase sessions (Supabase has SAML but no SCIM). Domain verification, enforced SSO, just-in-time provisioning.
+- **Identity:** SAML/OIDC SSO, SCIM provisioning and an admin portal via WorkOS, bridged to Better Auth sessions (Better Auth has SSO and SCIM plugins). Domain verification, enforced SSO, just-in-time provisioning.
 - **Audit logs:** append-only (sign-ins, role changes, exports, AI generations, billing), retained ≥ 1 year, CSV/API export, SIEM streaming.
 - **Admin console:** members, roles, SSO, usage, spend caps, retention settings, and model-provider policy (e.g. US/EU-hosted models only for data-residency-sensitive customers).
 - **Compliance:** SOC 2 Type I, then Type II (3–6 month window — start early, via Vanta or Drata); GDPR DPA and subprocessor list; Nigeria's NDPA 2023 if the entity is Nigerian; data export and deletion APIs; EU-region option.
@@ -128,7 +144,7 @@ _Written November 7, 2026, from market, research and codebase review. Update as 
 
 ## Decisions needed from the owner
 
-1. **Payments entity.** If the business is registered in Nigeria, Stripe can't open a standard merchant account; Paystack (a Stripe company) is the local route, with Stripe via a UK/US entity for international cards.
+1. **Payments — decided Nov 9, 2026:** Paynow Zimbabwe replaces Stripe; USD prepaid passes (1 or 12 months) because Paynow has no automatic recurring charges. Built: hosted checkout, hash-verified result URL, status polling, `fulfil_payment` (credits exactly once), hourly lapse to Free. Later, with Paynow's approval: card tokenisation for opt-in auto-renewal, and email reminders before a pass ends (Resend).
 2. **Credit economics.** Price an Ideogram lead with `pnpm ideogram:quote`, then set generation credits so Pro and Max stay profitable.
 3. **First customer.** Self-serve small businesses first (recommended), then teams and agencies, then enterprise when deals ask for SSO.
 4. **Model hosting policy.** Groq (US) is fine for most buyers; Z.AI and DeepSeek host in China — enterprise tenants may need them disabled.

@@ -2,14 +2,17 @@ node_modules/
 .next/
 out/
 build/
+dist/
+.turbo/
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
 .env
 !.env.example
-.vercel
-supabase/.temp/
-supabase/.branches/
+
+# WhatsApp Web session and cache (apps/whatsapp in development)
+.wwebjs_auth/
+.wwebjs_cache/
 
 # Local tooling
 .claude/settings.local.json
@@ -18,11 +21,11 @@ supabase/.branches/
 Thumbs.db
 
 # Playwright
-/test-results/
-/playwright-report/
-/playwright/.cache/
+test-results/
+playwright-report/
+playwright/.cache/
 
 # Benchmark output
-/benchmark-report/
-/benchmark-report.json
-/scripts/.tmp/
+benchmark-report/
+benchmark-report.json
+**/scripts/.tmp/

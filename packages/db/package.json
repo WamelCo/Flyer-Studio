@@ -1,0 +1,33 @@
+{
+  "name": "@flyer/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx scripts/migrate.mts",
+    "studio": "drizzle-kit studio",
+    "build": "esbuild scripts/migrate.mts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/migrate.cjs --external:pg-native --log-level=warning",
+    "test": "tsx scripts/test-credits.mts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flyer/log": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@flyer/tsconfig": "workspace:*",
+    "@types/node": "^26.6.6",
+    "typescript": "^5.9.3",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.11",
+    "@electric-sql/pglite": "^0.5.15",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.23.15"
+  }
+}

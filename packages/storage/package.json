@@ -1,0 +1,23 @@
+{
+  "name": "@flyer/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "tsx scripts/test-storage.mts",
+    "typecheck": "tsc --noEmit",
+    "setup": "tsx scripts/setup.mts"
+  },
+  "dependencies": {
+    "aws4fetch": "1.0.20"
+  },
+  "devDependencies": {
+    "@flyer/tsconfig": "workspace:*",
+    "@types/node": "^26.6.6",
+    "typescript": "^5.9.3",
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,0 +1,17 @@
+diff --git a/src/util/Injected/Utils.js b/src/util/Injected/Utils.js
+index 540078a9d07b3df07ccd51b030556a72af4cf650..b312dd21a5554a94c69cfd9c55851eda3348d7c3 100644
+--- a/src/util/Injected/Utils.js
++++ b/src/util/Injected/Utils.js
+@@ -483,6 +483,12 @@ exports.LoadUtils = () => {
+             ...extraOptions,
+         };
+ 
++        // Flyer Studio patch (upstream wwebjs/whatsapp-web.js#201923): media data carries
++        // WhatsApp's internal __x_id, and spreading it replaced the message's own id, so every
++        // media send failed with "Data passed to getter must include an id property".
++        delete message.__x_id;
++        message.id = newMsgKey;
++
+         // Bot's won't reply if canonicalUrl is set (linking)
+         if (botOptions) {
+             delete message.canonicalUrl;
