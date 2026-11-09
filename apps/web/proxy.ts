@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { contentSecurityPolicy } from "@/lib/security-headers";
 
-const PROTECTED_PREFIXES = ["/dashboard", "/projects", "/billing", "/editor", "/whatsapp"];
+const PROTECTED_PREFIXES = ["/dashboard", "/projects", "/billing", "/editor", "/whatsapp", "/account"];
 
 export function isProtectedPath(pathname: string) {
   return PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

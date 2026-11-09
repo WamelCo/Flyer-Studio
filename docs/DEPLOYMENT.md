@@ -19,7 +19,7 @@ In `.env`, at minimum:
 | --- | --- |
 | `NEXT_PUBLIC_SITE_URL` | The public https URL. Baked into the build: rebuild after changing it. |
 | `STORAGE_*` | Cloudflare R2: two buckets (`flyers` public via a custom domain, `exports` private), an API token with Object Read & Write. Run `pnpm storage:setup` once (from any machine with the same values) to create missing buckets and the CORS rule the editor needs. |
-| `RESEND_API_KEY`, `EMAIL_FROM` | Email sign-in codes. Verify your domain in Resend (SPF, DKIM) so codes don't land in spam. |
+| `SMTP_*` or `RESEND_API_KEY` + `EMAIL_FROM` | Email sign-in codes. SMTP works with any mail account (Gmail app password, Zoho, your host); Resend needs your domain verified (SPF, DKIM) so codes don't land in spam. Without either, production offers WhatsApp sign-in only. |
 | `PAYNOW_*` | Paynow integration ID and key; `PAYNOW_TEST_AUTH_EMAIL` while it is in test mode. |
 | AI keys | `LLM_PROVIDER` + `LLM_API_KEY` (or `ANTHROPIC_API_KEY`), `UNSPLASH_ACCESS_KEY`, optionally `IDEOGRAM_API_KEY`. |
 | `WHATSAPP_ADMIN_TOKEN` | Protects the QR page `http://localhost:3001/qr?token=…` (on the server only). |

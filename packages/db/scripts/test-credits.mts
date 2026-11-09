@@ -283,6 +283,27 @@ await test("merge_accounts: a WhatsApp account folds into a web account — proj
   assert.equal((await sql<{ user_id: string }>("select user_id from public.free_flyer_grants where phone = '+263773333333'"))[0]!.user_id, web);
 });
 
+await test("merge_accounts the other way: a web (email) account folds into a WhatsApp account", async () => {
+  const wa = "00000000-0000-4000-8000-0000000000d1";
+  const web = "00000000-0000-4000-8000-0000000000d2";
+  await phoneUser(wa, "+263774444444");
+  await sql(`insert into public."user" (id, name, email, email_verified) values ($1, 'Web', 'tari@example.com', true)`, [web]);
+  await sql("select public.add_credits($1, 25, 'test', 'merge2:topup')", [web]);
+  await sql("insert into public.flyer_projects (user_id, format, canvas) values ($1, 'square', '{}')", [web]);
+  const { mergeAccounts } = await import("../src/credits");
+  await mergeAccounts(web, wa);
+  // The app then gives the WhatsApp account the (now free) email address.
+  await sql(`update public."user" set email = 'tari@example.com', email_verified = true where id = $1`, [wa]);
+  const [account] = await sql<{ email: string; phone_number: string; credits: number; free_flyers: number }>(
+    `select u.email, u.phone_number, p.credits, p.free_flyers from public."user" u join public.profiles p on p.id = u.id where u.id = $1`,
+    [wa],
+  );
+  assert.deepEqual(account, { email: "tari@example.com", phone_number: "+263774444444", credits: 25, free_flyers: 3 });
+  assert.equal((await sql("select 1 from public.flyer_projects where user_id = $1", [wa])).length, 1);
+  assert.equal((await sql(`select 1 from public."user" where id = $1`, [web])).length, 0);
+  assert.equal((await sql<{ email: string }>("select email from public.profiles where id = $1", [wa]))[0]!.email, "tari@example.com", "profile email follows");
+});
+
 await test("deleting a user removes everything they own", async () => {
   await sql(`delete from public."user" where id = $1`, [userId]);
   for (const table of ["profiles", "credit_ledger", "flyer_projects", "payments", "whatsapp_chats", "session"]) {

@@ -14,13 +14,15 @@
   "dependencies": {
     "@flyer/db": "workspace:*",
     "@flyer/log": "workspace:*",
-    "better-auth": "1.7.18"
+    "better-auth": "1.7.18",
+    "nodemailer": "^10.4.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "@flyer/tsconfig": "workspace:*",
     "@types/node": "^26.6.6",
-    "typescript": "^5.9.3",
-    "@electric-sql/pglite": "^0.5.15",
-    "tsx": "^4.23.15"
+    "@types/nodemailer": "^8.0.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   }
 }

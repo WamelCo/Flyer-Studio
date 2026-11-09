@@ -29,7 +29,8 @@
     "dev:whatsapp": "pnpm --filter @flyer/whatsapp dev",
     "dev:all": "turbo run dev",
     "test:storage": "pnpm --filter @flyer/storage test",
-    "admin:grant-pass": "pnpm --filter @flyer/billing grant-pass"
+    "admin:grant-pass": "pnpm --filter @flyer/billing grant-pass",
+    "test:auth": "pnpm --filter @flyer/auth test"
   },
   "devDependencies": {
     "turbo": "2.11.10"

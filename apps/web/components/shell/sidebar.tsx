@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { CreditCard, LayoutGrid, LogOut, MessageCircle, PanelLeft, Sparkles, type LucideIcon } from "lucide-react";
+import { CreditCard, LayoutGrid, LogOut, PanelLeft, Sparkles, UserRound, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -25,7 +25,7 @@ interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Create", icon: Sparkles },
   { href: "/projects", label: "Projects", icon: LayoutGrid },
-  { href: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
+  { href: "/account", label: "Account", icon: UserRound },
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 

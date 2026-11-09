@@ -13,7 +13,7 @@ A production SaaS that generates flyers from a text prompt — on the web or ove
 - Turborepo + pnpm workspaces (`apps/*`, `packages/*`); TypeScript strict mode everywhere
 - Next.js 16 (App Router) — `apps/web`; Tailwind CSS + shadcn/ui
 - Postgres + Drizzle ORM — `packages/db` (schema, SQL migrations, credit functions). No vendor-specific database features.
-- Better Auth — `packages/auth`: sign-in codes by email (Resend) and by WhatsApp
+- Better Auth — `packages/auth`: sign-in codes by WhatsApp and by email (SMTP or Resend)
 - Cloudflare R2 over the S3 API (any S3-compatible store works) — `packages/storage`
 - Paynow Zimbabwe (USD prepaid passes: hosted checkout + signed result URL + status polling) — `packages/billing`
 - WhatsApp: Hono + whatsapp-web.js — `apps/whatsapp`
@@ -57,6 +57,7 @@ pnpm admin:grant-pass <phone|email> <pro|max> [month|year]  # Give an account a 
 pnpm test:db                     # Migrations, credit ledger, passes, upkeep, WhatsApp trials — PGlite
 pnpm test:whatsapp               # The WhatsApp bot (PGlite + a fake channel) and its internal API
 pnpm test:storage                # Storage helpers; with STORAGE_* set, a live R2/S3 round trip
+pnpm test:auth                   # Email codes over SMTP (fake server) and Resend; phone-number handling
 pnpm test:paynow                 # Paynow: hash vs Paynow's documented examples, client vs a mock Paynow
 pnpm test:director               # Art director against a mock OpenAI-compatible provider
 pnpm director:try "<prompt>"     # Try the configured art director on a real prompt

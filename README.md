@@ -12,8 +12,8 @@ Project rules live in `CLAUDE.md` and `.claude/rules/`. Layout is described in `
 2. Postgres: `docker run -d --name flyer-pg -p 5432:5432 -e POSTGRES_PASSWORD=flyer postgres:17` (or any Postgres).
 3. Copy `.env.example` to `.env.local` at the repo root and fill it in — every app and script reads it:
    - `DATABASE_URL` (matches step 2 by default) and `BETTER_AUTH_SECRET` (`openssl rand -base64 32`).
-   - Email codes: `RESEND_API_KEY` + `EMAIL_FROM`. Without them, in development the code is printed in the
-     server log, so you can sign in offline.
+   - Email codes: `SMTP_*` (e.g. Gmail with an app password, no domain needed) or `RESEND_API_KEY` + `EMAIL_FROM`.
+     Without either, in development the code is printed in the terminal running `pnpm dev`.
    - Files: `STORAGE_*` for a Cloudflare R2 bucket pair, then `pnpm storage:setup`. Offline, any S3-compatible
      server works, e.g. `docker run -d -p 9100:9000 -e RUSTFS_ACCESS_KEY=dev -e RUSTFS_SECRET_KEY=dev-secret-123 rustfs/rustfs`
      with `STORAGE_ENDPOINT=http://127.0.0.1:9100`, `STORAGE_REGION=us-east-1`, `STORAGE_PUBLIC_URL=http://127.0.0.1:9100/flyers`.

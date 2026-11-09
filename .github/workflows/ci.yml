@@ -51,6 +51,9 @@ jobs:
       - name: Storage helpers (keys, public URLs, image sniffing)
         run: pnpm test:storage
 
+      - name: Email codes (fake SMTP server) and phone numbers
+        run: pnpm test:auth
+
       - name: Art director (mock provider)
         run: pnpm test:director
 

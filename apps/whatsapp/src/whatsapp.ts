@@ -78,36 +78,106 @@ export function startWhatsApp(onMessage: (message: Incoming) => void): WhatsApp 
     setTimeout(() => void client.initialize().catch((error: unknown) => log.error("whatsapp.restart_failed", { reason: String(error) })), 10_000);
   });
 
+  /** A call into WhatsApp Web that gives up after `ms` instead of hanging (a stalled page can take minutes). */
+  const within = <T,>(promise: Promise<T>, ms: number, what: string) =>
+    Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${what} timed out`)), ms))]);
+
   /** The sender's phone. Newer WhatsApp hides it behind a linked-device id (@lid) that we resolve. */
-  async function phoneOf(from: string): Promise<string | null> {
+  async function phoneOf(message: { from: string; getContact(): Promise<{ number?: string }> }): Promise<string | null> {
+    const from = message.from;
     if (from.endsWith("@c.us")) return `+${from.split("@")[0]}`;
     if (from.endsWith("@lid")) {
       try {
-        const [pair] = await client.getContactLidAndPhone([from]);
+        const [pair] = await within(client.getContactLidAndPhone([from]), 15_000, "getContactLidAndPhone");
         if (pair?.pn) return `+${pair.pn.split("@")[0]}`;
-      } catch {
-        // fall through
+      } catch (error) {
+        log.warn("whatsapp.lid_lookup_failed", { step: "lid_and_phone", reason: error instanceof Error ? error.message : String(error) });
       }
       try {
-        const contact = await client.getContactById(from);
-        if (contact.number) return `+${contact.number}`;
-      } catch {
-        // unknown
+        const contact = await within(message.getContact(), 15_000, "getContact");
+        if (contact.number && /^\d{8,15}$/.test(contact.number)) return `+${contact.number}`;
+      } catch (error) {
+        log.warn("whatsapp.lid_lookup_failed", { step: "contact", reason: error instanceof Error ? error.message : String(error) });
       }
     }
     return null;
   }
 
-  client.on("message", async (message) => {
+  type WebMessage = wweb.Message;
+
+  /**
+   * Messages that arrived while the service was down or deaf don't come back as new events.
+   * On every connect, answer the unread ones from the last 6 hours (at most 5 per chat); the
+   * bot's message-id table makes sure nothing is answered twice.
+   */
+  async function catchUp() {
+    const describe = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 200);
+    if (!client.pupPage) return;
+    let unread: unknown[];
+    try {
+      // whatsapp-web.js's getChats() builds a full model for every chat and fails on current
+      // WhatsApp Web, so read the chat store directly: unread 1:1 chats, their last few messages.
+      unread = await within(
+        client.pupPage.evaluate(() => {
+          const page = window as unknown as {
+            require(name: string): { Chat: { getModelsArray(): { id?: { server?: string }; unreadCount?: number; msgs?: { getModelsArray(): { id?: { fromMe?: boolean } }[] } }[] } };
+            WWebJS: { getMessageModel(message: unknown): unknown };
+          };
+          const found: unknown[] = [];
+          for (const chat of page.require("WAWebCollections").Chat.getModelsArray()) {
+            const server = chat.id?.server;
+            const count = chat.unreadCount ?? 0;
+            if ((server !== "c.us" && server !== "lid") || count <= 0) continue;
+            for (const message of (chat.msgs?.getModelsArray() ?? []).slice(-Math.min(count, 5))) {
+              if (message.id?.fromMe) continue;
+              try {
+                found.push(page.WWebJS.getMessageModel(message));
+              } catch {
+                // a message WhatsApp Web can't describe: skip it
+              }
+            }
+          }
+          return found;
+        }),
+        60_000,
+        "reading unread chats",
+      );
+    } catch (error) {
+      log.warn("whatsapp.catch_up_failed", { reason: describe(error) });
+      return;
+    }
+    const MessageClass = (wweb as unknown as { Message: new (client: unknown, data: unknown) => wweb.Message }).Message;
+    let handled = 0;
+    for (const data of unread) {
+      try {
+        const message = new MessageClass(client, data);
+        if (Date.now() / 1000 - message.timestamp > 6 * 3600) continue;
+        await incoming(message);
+        handled += 1;
+      } catch (error) {
+        log.warn("whatsapp.catch_up_message_failed", { reason: describe(error) });
+      }
+    }
+    log.info("whatsapp.caught_up", { unread: unread.length, handled });
+  }
+  client.on("ready", () => setTimeout(() => void catchUp(), 5_000));
+
+  client.on("message", (message) => void incoming(message));
+
+  async function incoming(message: WebMessage) {
     if (message.fromMe || message.isStatus || message.from.endsWith("@g.us") || message.from === "status@broadcast" || message.from.endsWith("@newsletter")) return;
+    // Logged before anything can go wrong, so "nothing happened" is always visible in the log.
+    log.info("whatsapp.received", { chat: message.from.split("@")[1], type: message.type });
+    const phone = await phoneOf(message);
+    if (!phone) log.warn("whatsapp.number_unresolved", { chat: message.from.split("@")[1] });
     onMessage({
       id: messageId(message),
       chatId: message.from,
-      phone: await phoneOf(message.from),
+      phone,
       body: message.body ?? "",
       kind: message.type === "chat" ? "text" : message.hasMedia ? "media" : "other",
     });
-  });
+  }
 
   const channel: Channel = {
     async sendText(chatId, text) {
@@ -169,6 +239,27 @@ export function startWhatsApp(onMessage: (message: Incoming) => void): WhatsApp 
         setTimeout(start, 5_000);
       });
   };
+
+  // Watchdog. A WhatsApp Web load that stalls part-way (a busy machine, a slow line) can report
+  // "ready" without the hook that hands incoming messages to us — every message is then dropped
+  // silently. Every two minutes, check the hook is there and the page answers; if not, reconnect.
+  const watchdog = setInterval(async () => {
+    if (state.status !== "ready" || restarting || !client.pupPage) return;
+    try {
+      const hooked = await within(
+        client.pupPage.evaluate(() => {
+          const page = window as unknown as { onAddMessageEvent?: unknown; WWebJS?: { getMessageModel?: unknown } };
+          return typeof page.onAddMessageEvent === "function" && typeof page.WWebJS?.getMessageModel === "function";
+        }),
+        30_000,
+        "health check",
+      );
+      if (!hooked) restart("incoming-message hook missing");
+    } catch (error) {
+      restart(`health check failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, 120_000);
+  watchdog.unref?.();
 
   return {
     state,

@@ -1,13 +1,43 @@
 import { log } from "@flyer/log";
+import nodemailer, { type Transporter } from "nodemailer";
 
 /**
- * Sign-in codes by email through Resend's HTTP API (RESEND_API_KEY, EMAIL_FROM). In
- * development without a key the code is printed to the server log instead, so sign-in
- * works offline; in production a missing key is an error.
+ * Sign-in codes by email, through whichever sender is configured:
+ *   Resend   RESEND_API_KEY + EMAIL_FROM (needs a domain verified in Resend)
+ *   SMTP     SMTP_HOST + SMTP_USER + SMTP_PASS (Gmail with an app password, Zoho, your host…)
+ * In development with neither, the code is printed to the server log instead, so sign-in
+ * works offline; in production that is an error.
  */
 
+function smtpConfigured(env: NodeJS.ProcessEnv) {
+  return Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
+}
+
 export function emailConfigured(env: NodeJS.ProcessEnv = process.env) {
-  return Boolean(env.RESEND_API_KEY && env.EMAIL_FROM);
+  return Boolean((env.RESEND_API_KEY && env.EMAIL_FROM) || smtpConfigured(env));
+}
+
+let transport: { key: string; transporter: Transporter } | null = null;
+function smtp(env: NodeJS.ProcessEnv) {
+  const port = Number(env.SMTP_PORT || 465);
+  const key = `${env.SMTP_HOST}:${port}:${env.SMTP_USER}`;
+  if (transport?.key !== key) {
+    transport = {
+      key,
+      transporter: nodemailer.createTransport({
+        host: env.SMTP_HOST,
+        port,
+        // 465 is TLS from the start; 587 upgrades with STARTTLS.
+        secure: env.SMTP_SECURE ? env.SMTP_SECURE === "true" : port === 465,
+        // Gmail shows app passwords in groups of four ("abcd efgh …"): the spaces aren't part of it.
+        auth: { user: env.SMTP_USER, pass: (env.SMTP_PASS ?? "").replace(/\s+/g, "") },
+        connectionTimeout: 15_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 20_000,
+      }),
+    };
+  }
+  return transport.transporter;
 }
 
 const SUBJECTS: Record<string, string> = {
@@ -28,31 +58,39 @@ function html(code: string) {
 </table></td></tr></table></body></html>`;
 }
 
-export async function sendEmailCode(email: string, code: string, type: string) {
-  const key = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
-  if (!key || !from) {
-    if (process.env.NODE_ENV !== "production") {
-      // Development only: no email service, so show the code where the developer can see it.
-      console.log(`\n  Sign-in code for ${email}: ${code}   (set RESEND_API_KEY and EMAIL_FROM to email it)\n`);
-      return;
+export async function sendEmailCode(email: string, code: string, type: string, env: NodeJS.ProcessEnv = process.env) {
+  const subject = SUBJECTS[type] ?? SUBJECTS["sign-in"]!;
+  const text = `Your Flyer Studio code is ${code}. It expires in 10 minutes.`;
+
+  if (env.RESEND_API_KEY && env.EMAIL_FROM) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: env.EMAIL_FROM, to: [email], subject, html: html(code), text }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      log.error("auth.email_failed", { via: "resend", status: response.status, body: (await response.text()).slice(0, 200) });
+      throw new Error("EMAIL_SEND_FAILED");
     }
-    throw new Error("EMAIL_NOT_CONFIGURED");
+    return;
   }
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from,
-      to: [email],
-      subject: SUBJECTS[type] ?? SUBJECTS["sign-in"],
-      html: html(code),
-      text: `Your Flyer Studio code is ${code}. It expires in 10 minutes.`,
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) {
-    log.error("auth.email_failed", { status: response.status, body: (await response.text()).slice(0, 200) });
-    throw new Error("EMAIL_SEND_FAILED");
+
+  if (smtpConfigured(env)) {
+    try {
+      await smtp(env).sendMail({ from: env.EMAIL_FROM || `Flyer Studio <${env.SMTP_USER}>`, to: email, subject, html: html(code), text });
+    } catch (error) {
+      // Never log the password: nodemailer's message names the server and the reason only.
+      log.error("auth.email_failed", { via: "smtp", host: env.SMTP_HOST, reason: error instanceof Error ? error.message : String(error) });
+      throw new Error("EMAIL_SEND_FAILED");
+    }
+    return;
   }
+
+  if (env.NODE_ENV !== "production") {
+    // Development only: no email service, so show the code where the developer can see it.
+    console.log(`\n  Sign-in code for ${email}: ${code}   (set SMTP_* or RESEND_API_KEY + EMAIL_FROM to email it)\n`);
+    return;
+  }
+  throw new Error("EMAIL_NOT_CONFIGURED");
 }
