@@ -32,6 +32,8 @@ export interface GenerationInput {
   ideogram?: boolean;
   /** Paid with a free flyer: given back if the job fails. */
   freeFlyer?: boolean;
+  /** How many designs (1–3, default 3). WhatsApp sends one: the Ideogram lead when it runs, else the engine's best. */
+  variations?: number;
 }
 
 /** What a finished generation hands the client (the web app adds the balance). */
@@ -76,8 +78,9 @@ export async function designFlyer(input: GenerationInput, onStage: (stage: Stage
   await onStage("designing");
   // The Ideogram lead and the stock-photo search don't depend on each other.
   const useIdeogram = input.ideogram !== false && ideogramConfigured() && (await ideogramAllowed(userId));
+  const count = Math.min(VARIATIONS, Math.max(1, input.variations ?? VARIATIONS));
   const [photoSets, lead] = await Promise.all([
-    photosForBrief(brief.photoQueries, format, VARIATIONS),
+    photosForBrief(brief.photoQueries, format, count),
     useIdeogram
       ? ideogramDirection({
           brief,
@@ -93,9 +96,12 @@ export async function designFlyer(input: GenerationInput, onStage: (stage: Stage
 
   await onStage("composing");
   const ranked = chooseVariants(choices, { count: VARIATIONS, hasPhotos: photoSets.every((set) => set.length > 0), richCopy: hasRichCopy(copy), copy });
-  // With an Ideogram lead (first palette and pairing), the engine designs the other two
-  // directions in the second and third, keeping its best layouts.
-  const variants = lead ? ranked.slice(0, 2).map((v, i) => ({ ...v, palette: ranked[i + 1]!.palette, pairing: ranked[i + 1]!.pairing })) : ranked;
+  // With an Ideogram lead (first palette and pairing), the engine designs the remaining
+  // directions in the next palettes and pairings, keeping its best layouts. Ranking always
+  // considers three, so a single design is the best of them.
+  const variants = lead
+    ? ranked.slice(0, count - 1).map((v, i) => ({ ...v, palette: ranked[i + 1]!.palette, pairing: ranked[i + 1]!.pairing }))
+    : ranked.slice(0, count);
   const offset = lead ? 1 : 0;
   const richCopy = hasRichCopy(copy);
   const slots: Slot[] = [

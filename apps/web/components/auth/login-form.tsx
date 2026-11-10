@@ -49,9 +49,30 @@ interface LoginFormProps {
   studioNumber?: string | null;
   /** Development without an email service: the code is printed in the terminal running the app. */
   emailCodeInTerminal?: boolean;
+  /** The database can't be reached right now: sign-in waits and carries on by itself. */
+  unavailable?: boolean;
+  /** The studio's WhatsApp is connected, so WhatsApp codes can go out. */
+  whatsappReady?: boolean;
+  /** Development: say what to check when something is down. */
+  showDevHints?: boolean;
 }
 
-export function LoginForm({ next, initialError, configured, emailEnabled, whatsappEnabled, initialMethod = "whatsapp", studioNumber, emailCodeInTerminal }: LoginFormProps) {
+/** How often a paused sign-in checks whether the database is back. */
+const HEALTH_POLL_MS = 4_000;
+
+export function LoginForm({
+  next,
+  initialError,
+  configured,
+  emailEnabled,
+  whatsappEnabled,
+  initialMethod = "whatsapp",
+  studioNumber,
+  emailCodeInTerminal,
+  unavailable = false,
+  whatsappReady = true,
+  showDevHints = false,
+}: LoginFormProps) {
   const router = useRouter();
   const [method, setMethod] = useState<Method>(whatsappEnabled && (initialMethod === "whatsapp" || !emailEnabled) ? "whatsapp" : "email");
   const [step, setStep] = useState<"contact" | "code">("contact");
@@ -69,8 +90,27 @@ export function LoginForm({ next, initialError, configured, emailEnabled, whatsa
     return () => window.clearTimeout(timer);
   }, [cooldown]);
 
+  // Database down: check quietly until it's back, then re-render on the server — which
+  // sends someone who is still signed in straight on to `next`.
+  useEffect(() => {
+    if (!unavailable) return;
+    const timer = window.setInterval(async () => {
+      const healthy = await fetch("/api/health", { cache: "no-store" }).then(
+        (response) => response.ok,
+        () => false,
+      );
+      if (healthy) router.refresh();
+    }, HEALTH_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [unavailable, router]);
+
   const number = toE164(phone);
   const recipient = method === "email" ? email : (number ?? phone);
+
+  function switchMethod(value: Method) {
+    setMethod(value);
+    setError(null);
+  }
 
   async function sendCode() {
     setPending(true);
@@ -95,7 +135,7 @@ export function LoginForm({ next, initialError, configured, emailEnabled, whatsa
 
   async function onSubmitContact(event: FormEvent) {
     event.preventDefault();
-    if (!configured || pending) return;
+    if (!configured || unavailable || pending) return;
     if (method === "whatsapp" && !number) {
       setError("Enter your WhatsApp number with its country code, e.g. +263 77 123 4567.");
       return;
@@ -147,7 +187,7 @@ export function LoginForm({ next, initialError, configured, emailEnabled, whatsa
               <p className="text-callout text-fg-secondary">
                 We&rsquo;ll send you a {OTP_LENGTH}-digit code {method === "email" ? "by email" : "on WhatsApp"}. No password needed.
               </p>
-              {method === "whatsapp" && studioNumber && (
+              {method === "whatsapp" && studioNumber && whatsappReady && (
                 <p className="text-caption text-fg-secondary">
                   It comes from Flyer Studio on WhatsApp, <span className="font-medium text-fg">{studioNumber}</span>.
                 </p>
@@ -158,10 +198,7 @@ export function LoginForm({ next, initialError, configured, emailEnabled, whatsa
                 <SegmentedControl
                   label="Sign-in method"
                   value={method}
-                  onChange={(value) => {
-                    setMethod(value);
-                    setError(null);
-                  }}
+                  onChange={switchMethod}
                   options={[
                     { value: "whatsapp", label: "WhatsApp" },
                     { value: "email", label: "Email" },
@@ -208,9 +245,24 @@ export function LoginForm({ next, initialError, configured, emailEnabled, whatsa
               </>
             )}
             <InlineMessage>{error}</InlineMessage>
-            {/* A setup notice, not an input error: no red outline on the field. */}
+            {error && method === "whatsapp" && emailEnabled && (
+              <Button type="button" variant="plain" size="sm" className="self-center" onClick={() => switchMethod("email")}>
+                Send it by email instead
+              </Button>
+            )}
+            {/* Setup and status notices, not input errors: no red outline on the field. */}
             <InlineMessage tone="neutral">{configured ? null : ERROR_COPY.not_configured}</InlineMessage>
-            <Button type="submit" size="lg" disabled={!configured || pending || !(method === "email" ? email : phone)}>
+            <InlineMessage tone="neutral">
+              {configured && unavailable
+                ? `Sign-in is paused for a moment — we can't reach the database. This page carries on by itself as soon as it's back.${showDevHints ? " Development: check that Postgres is running (DATABASE_URL)." : ""}`
+                : null}
+            </InlineMessage>
+            <InlineMessage tone="neutral">
+              {configured && !unavailable && method === "whatsapp" && !whatsappReady && !error
+                ? `WhatsApp codes are offline for a moment${emailEnabled ? " — use email, or try again shortly" : ". Try again shortly"}.${showDevHints ? " Development: start the WhatsApp service (pnpm dev:whatsapp) and scan its QR code." : ""}`
+                : null}
+            </InlineMessage>
+            <Button type="submit" size="lg" disabled={!configured || unavailable || pending || !(method === "email" ? email : phone)}>
               {pending ? "Sending code…" : method === "email" ? "Continue with email" : "Send code on WhatsApp"}
             </Button>
           </motion.form>
@@ -241,7 +293,7 @@ export function LoginForm({ next, initialError, configured, emailEnabled, whatsa
               inputMode="numeric"
               autoComplete="one-time-code"
               pattern={`\\d{${OTP_LENGTH}}`}
-              maxLength={OTP_LENGTH}
+              // No maxLength: pasting the whole WhatsApp or email message keeps its first 6 digits.
               placeholder={"0".repeat(OTP_LENGTH)}
               value={code}
               onChange={(event) => onCodeChange(event.target.value)}

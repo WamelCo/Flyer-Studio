@@ -8,6 +8,7 @@ import { log } from "@flyer/log";
 
 import { sendEmailCode } from "./email";
 import { sendWhatsAppText, whatsappGatewayConfigured } from "./gateway";
+import { authLog } from "./logger";
 import { isPhoneEmail, PHONE_EMAIL_DOMAIN, phoneDigits } from "./phone";
 
 export { isPhoneEmail, PHONE_EMAIL_DOMAIN, normalizePhone, phoneDigits } from "./phone";
@@ -38,6 +39,7 @@ export function createAuth({ plugins = [] }: { plugins?: BetterAuthPlugin[] } = 
     appName: "Flyer Studio",
     baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
     secret: process.env.BETTER_AUTH_SECRET,
+    logger: { log: authLog },
     database: drizzleAdapter(db(), {
       provider: "pg",
       schema: { user: schema.user, session: schema.session, account: schema.account, verification: schema.verification },

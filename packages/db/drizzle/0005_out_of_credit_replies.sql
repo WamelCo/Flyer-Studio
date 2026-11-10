@@ -1,0 +1,1 @@
+ALTER TABLE "whatsapp_chats" ADD COLUMN "out_of_credit_replies" integer DEFAULT 0 NOT NULL;

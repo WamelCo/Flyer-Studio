@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { serve } from "@hono/node-server";
 import { closeDb } from "@flyer/db";
 import { log } from "@flyer/log";
@@ -16,12 +17,35 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-let bot: ReturnType<typeof createBot> | null = null;
-const whatsapp = startWhatsApp((message) => void bot?.handle(message));
-bot = createBot({ channel: whatsapp.channel });
-
 const port = Number(process.env.WHATSAPP_PORT || 3001);
 const hostname = process.env.WHATSAPP_HOST || "127.0.0.1";
+const development = process.env.NODE_ENV !== "production";
+const qrPage = `http://localhost:${port}/qr`;
+
+/** The default browser, for the QR page (development on this machine). */
+function openInBrowser(url: string) {
+  const [command, args] =
+    process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
+  try {
+    spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true })
+      .on("error", () => undefined)
+      .unref();
+  } catch {
+    // No browser to open (a server, CI): the link is in the log.
+  }
+}
+
+let bot: ReturnType<typeof createBot> | null = null;
+const whatsapp = startWhatsApp((message) => void bot?.handle(message), {
+  // Development: a big scannable QR in the browser, not one squeezed into the terminal.
+  terminalQr: !development,
+  onQr() {
+    if (!development) return;
+    console.log(`\nLink the studio phone: ${qrPage} — WhatsApp → Linked devices → Link a device, then scan.\n`);
+    if (process.env.WHATSAPP_OPEN_QR !== "0") openInBrowser(qrPage);
+  },
+});
+bot = createBot({ channel: whatsapp.channel });
 const server = serve({ fetch: createServer(whatsapp).fetch, port, hostname }, () => log.info("whatsapp.listening", { url: `http://${hostname}:${port}` }));
 
 // whatsapp-web.js re-injects itself on page navigations without awaiting it, so a Chrome that

@@ -24,5 +24,8 @@ export function authErrorMessage(error: { status?: number; message?: string; cod
   if (error.code === "INVALID_OTP" || error.code === "OTP_EXPIRED" || /otp|code/i.test(error.code ?? "")) return "That code didn't match or has expired. Try again or request a new one.";
   if (error.code === "TOO_MANY_ATTEMPTS") return "Too many wrong codes. Request a new one.";
   if (error.code === "PHONE_NUMBER_EXIST") return "That WhatsApp number is already linked to another account.";
+  // Our own 503s explain themselves; a bare 500 means the server (usually its database) is having trouble.
+  if (error.status === 503 && error.message) return error.message;
+  if (error.status && error.status >= 500) return "Sign-in is having trouble on our side. Try again in a moment.";
   return error.message || fallback;
 }

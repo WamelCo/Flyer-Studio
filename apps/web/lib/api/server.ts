@@ -7,7 +7,9 @@ import { isPhoneEmail } from "@flyer/auth";
 import { BillingError } from "@flyer/billing/payments";
 import { StorageError } from "@flyer/storage";
 
-import { getSession } from "@/lib/auth/server";
+import { isDatabaseUnavailable } from "@flyer/db";
+
+import { AuthUnavailableError, getSession } from "@/lib/auth/server";
 
 const STATUS: Record<ApiErrorCode, number> = {
   UNAUTHORIZED: 401,
@@ -31,6 +33,7 @@ const STATUS: Record<ApiErrorCode, number> = {
   UPLOAD_FAILED: 502,
   INTERNAL_ERROR: 500,
   NETWORK_ERROR: 503,
+  SERVICE_UNAVAILABLE: 503,
 };
 
 /** Throw from anywhere inside `handle()` to return a typed error response. */
@@ -64,6 +67,9 @@ export function handle<Args extends unknown[]>(fn: (...args: Args) => Promise<Re
       }
       if (error instanceof StorageError && error.message === "STORAGE_NOT_CONFIGURED") {
         return apiError("STORAGE_NOT_CONFIGURED", "File storage is not configured on this server (STORAGE_*).");
+      }
+      if (error instanceof AuthUnavailableError || isDatabaseUnavailable(error)) {
+        return apiError("SERVICE_UNAVAILABLE", "Flyer Studio can't reach its database right now. Try again in a moment.");
       }
       console.error("[api] unhandled error", error);
       reportError(error);

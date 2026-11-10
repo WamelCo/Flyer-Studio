@@ -23,14 +23,14 @@ export function formatPhone(e164: string) {
   return `+${d}`;
 }
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function call<T>(path: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<T> {
   const base = process.env.WHATSAPP_SERVICE_URL?.replace(/\/$/, "");
   const secret = process.env.INTERNAL_API_SECRET;
   if (!base || !secret) throw new Error("WHATSAPP_NOT_CONFIGURED");
   const response = await fetch(`${base}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json", ...init.headers },
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
   if (!response.ok) throw new Error(body.error ?? `WhatsApp service HTTP ${response.status}`);
@@ -48,10 +48,11 @@ export interface WhatsAppStatus {
   number: string | null;
 }
 
-export async function whatsappStatus(): Promise<WhatsAppStatus | null> {
+/** The WhatsApp service's connection, or null when it isn't configured or doesn't answer in time. */
+export async function whatsappStatus(timeoutMs = 3_000): Promise<WhatsAppStatus | null> {
   if (!whatsappGatewayConfigured()) return null;
   try {
-    return await call<WhatsAppStatus>("/internal/status");
+    return await call<WhatsAppStatus>("/internal/status", {}, timeoutMs);
   } catch {
     return null;
   }

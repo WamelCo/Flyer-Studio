@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { createJob, runJob, type RunOutcome } from "@flyer/ai/jobs";
 import type { GenerationInput } from "@flyer/ai/pipeline";
 import { sanitizePrompt } from "@flyer/ai/prompt";
-import { BillingError, getProfile, refreshPayment, siteUrl, startPayment } from "@flyer/billing/payments";
+import { BillingError, getProfile, refreshPayment, startPayment } from "@flyer/billing/payments";
 import { formatPrice } from "@flyer/billing/format";
 import { CREDIT_COSTS, PLANS, type BillingInterval, type PaidPlanId } from "@flyer/billing/plans";
 import { phoneAccount } from "@flyer/auth/accounts";
 import { isPhoneEmail } from "@flyer/auth/phone";
-import { and, chargeForFlyer, db, eq, flyerProjects, generationJobs, sql, whatsappChats, whatsappMessages } from "@flyer/db";
+import { MAX_PROMPT_LENGTH } from "@flyer/ai/prompt";
+import { and, chargeForFlyer, creditLedger, db, eq, generationJobs, or, sql, whatsappChats, whatsappMessages } from "@flyer/db";
 import { check, LIMITS } from "@flyer/db/rate-limit";
 import type { FlyerDoc, FlyerFormat } from "@flyer/design/canvas/types";
 import { renderPng } from "@flyer/design/render/png";
@@ -18,9 +19,10 @@ import type { Channel, Incoming } from "./channel";
 /**
  * The WhatsApp conversation — self-contained. The first message from a number creates its
  * account on the spot (the number is the account: no sign-up, no other details) with 3 free
- * flyers. Describe a flyer, get three designs back as images; "1", "2" or "3" opens one in the
- * web editor (sign in there with the same number: same account); "buy" sells a pass via Paynow.
- * Free flyers are watermarked and never use a paid Ideogram image.
+ * flyers. Describe a flyer, get one design back; reply with fixes and it is designed again with
+ * them; start a message with "new" for a different flyer; "buy" sells a pass via Paynow.
+ * Free flyers are watermarked and never use a paid Ideogram image; paid ones carry no mark.
+ * Someone out of free flyers who has never bought gets two replies, then silence (until "buy").
  */
 
 export interface BotDeps {
@@ -34,6 +36,11 @@ export interface BotDeps {
 }
 
 const IMAGE_WIDTH = 1080;
+/** Fixes apply to the last flyer for this long; after that a message is a new flyer. */
+const FIX_WINDOW_MS = 2 * 60 * 60_000;
+const OUT_OF_CREDIT_REPLIES = 2;
+const PURCHASE_COMMANDS = ["buy", "upgrade", "pass", "passes", "pricing", "price", "prices", "pro", "max"];
+const THANKS = ["thanks", "thank you", "thankyou", "thx", "ok", "okay", "cool", "great", "nice", "perfect", "awesome"];
 const GREETINGS = ["hi", "hie", "hello", "hey", "help", "menu", "start", "info", "good morning", "good afternoon", "good evening"];
 const COST = CREDIT_COSTS.generate;
 const PASSES: Record<string, { plan: PaidPlanId; interval: BillingInterval }> = {
@@ -71,9 +78,10 @@ export function createBot({ channel, generate = defaultGenerate, render = defaul
       chatId,
       [
         "*Flyer Studio* 🎨",
-        "Describe the flyer you need and I'll design three options. For example:",
+        "Describe the flyer you need and I'll design it. For example:",
         "_Braai fundraiser at Hatfield Primary, Saturday 2pm, $5 a plate, call 0771 234 567_",
         "",
+        "• After a flyer, reply with any fixes — or start with *new* for a different one",
         "• Add *status* for a WhatsApp Status size, or *square* for Instagram",
         "• *balance* — your credits",
         "• *buy* — get a Pro or Max pass",
@@ -140,59 +148,86 @@ export function createBot({ channel, generate = defaultGenerate, render = defaul
     timer.unref?.();
   }
 
-  /** "1", "2" or "3": an editor link for that design of the last flyer. */
-  async function openDesign(chatId: string, phone: string, userId: string, index: number) {
+  /** The chat's last flyer, if it is recent enough to fix. */
+  async function lastFlyer(phone: string, userId: string) {
     const [chat] = await db().select({ jobId: whatsappChats.lastJobId }).from(whatsappChats).where(eq(whatsappChats.phone, phone)).limit(1);
-    const [job] = chat?.jobId
-      ? await db()
-          .select({ result: generationJobs.result, projectId: generationJobs.projectId, format: generationJobs.format })
-          .from(generationJobs)
-          .where(and(eq(generationJobs.id, chat.jobId), eq(generationJobs.userId, userId)))
-          .limit(1)
-      : [];
-    const docs = (job?.result as { docs?: FlyerDoc[] } | null)?.docs;
-    if (!job || !docs?.[index]) return say(chatId, "Describe a flyer first — then reply 1, 2 or 3 to open a design.");
-    let projectId = job.projectId;
-    if (index > 0 || !projectId) {
-      const [project] = await db()
-        .insert(flyerProjects)
-        .values({ userId, title: `Flyer — design ${index + 1}`, format: job.format, canvas: JSON.parse(JSON.stringify(docs[index])), generationId: chat!.jobId })
-        .returning({ id: flyerProjects.id });
-      projectId = project!.id;
-    }
-    await say(chatId, `Design ${index + 1} is ready to edit, with HD, PDF and Photoshop export:\n${siteUrl()}/editor/${projectId}\n(Sign in there with this WhatsApp number — it's the same account.)`);
+    if (!chat?.jobId) return null;
+    const [job] = await db()
+      .select({ prompt: generationJobs.prompt, format: generationJobs.format, result: generationJobs.result, freeFlyer: generationJobs.freeFlyer, completedAt: generationJobs.completedAt })
+      .from(generationJobs)
+      .where(and(eq(generationJobs.id, chat.jobId), eq(generationJobs.userId, userId)))
+      .limit(1);
+    if (!job) return null;
+    const doc = (job.result as { docs?: FlyerDoc[] } | null)?.docs?.[0];
+    return { ...job, doc, recent: Boolean(job.completedAt && Date.now() - job.completedAt.getTime() < FIX_WINDOW_MS) };
   }
 
-  async function flyer(chatId: string, phone: string, userId: string, text: string, greeting?: string) {
+  /** "resend": the last flyer again (after WhatsApp failed to upload it). Free. */
+  async function resend(chatId: string, phone: string, userId: string) {
+    const last = await lastFlyer(phone, userId);
+    if (!last?.doc) return say(chatId, "There's no flyer to resend yet — describe the one you need.");
+    try {
+      await channel.sendImage(chatId, await render(last.doc, last.freeFlyer), "Here's your flyer again ✨", "flyer.png");
+    } catch {
+      await say(chatId, "WhatsApp still couldn't send it — please try *resend* again in a few minutes.");
+    }
+  }
+
+  /** The original request plus the fix, within the prompt limit (the fix always fits). */
+  function withFix(original: string, fix: string) {
+    const tail = `\nChanges: ${fix}`;
+    return `${original.slice(0, Math.max(0, MAX_PROMPT_LENGTH - tail.length))}${tail}`;
+  }
+
+  /** Has this account ever paid (a pass, or credits granted)? Payers always get answers. */
+  async function hasPaid(userId: string) {
+    const [row] = await db()
+      .select({ id: creditLedger.id })
+      .from(creditLedger)
+      .where(and(eq(creditLedger.userId, userId), or(sql`${creditLedger.reason} like 'pass:%'`, sql`${creditLedger.reason} like 'grant:%'`)))
+      .limit(1);
+    return Boolean(row);
+  }
+
+  /** Counts a reply to someone out of free flyers; returns how many they have now had. */
+  async function countOutOfCreditReply(phone: string, userId: string) {
+    const [row] = await db()
+      .insert(whatsappChats)
+      .values({ phone, userId, outOfCreditReplies: 1 })
+      .onConflictDoUpdate({ target: whatsappChats.phone, set: { outOfCreditReplies: sql`${whatsappChats.outOfCreditReplies} + 1`, updatedAt: sql`now()` } })
+      .returning({ count: whatsappChats.outOfCreditReplies });
+    return row?.count ?? 1;
+  }
+
+  async function flyer(chatId: string, phone: string, userId: string, text: string, greeting?: string, format?: FlyerFormat) {
     // Claimed before anything is awaited, so two quick messages can't both start (and pay for) a flyer.
     if (busy.has(phone)) return say(chatId, "Still working on your last flyer — it'll be here in a moment.");
     busy.add(phone);
     try {
-      await designFlyer(chatId, phone, userId, sanitizePrompt(text), greeting);
+      await designFlyer(chatId, phone, userId, sanitizePrompt(text), greeting, format);
     } finally {
       busy.delete(phone);
     }
   }
 
-  async function designFlyer(chatId: string, phone: string, userId: string, prompt: string, greeting?: string) {
+  async function designFlyer(chatId: string, phone: string, userId: string, prompt: string, greeting?: string, format: FlyerFormat = formatFrom(prompt)) {
     const { blocked } = await check(LIMITS.generate(userId));
     if (blocked) return say(chatId, "You're making flyers very quickly. Give it a minute and try again.");
 
     const jobId = randomUUID();
     const profile = await getProfile(userId);
-    // Free plan: free flyers first (watermarked either way). Pro/Max: credits first.
+    // Free plan: free flyers first. Pro/Max: credits first.
     const charge = await chargeForFlyer({ userId, jobId, cost: COST, preferFree: profile.plan === "free" });
     if (!charge.ok) {
       return say(chatId, `You've used your free flyers, and a flyer needs ${COST} credits (you have ${charge.balance}). Reply *buy* for a Pro or Max pass.`);
     }
     const free = charge.free;
 
-    const working = free
-      ? `Designing three options — this one's free (${plural(charge.freeLeft, "free flyer")} left after it). About a minute…`
-      : "Designing three options for you — about a minute…";
+    const working = free ? `Designing your flyer — this one's free (${plural(charge.freeLeft, "free flyer")} left after it). About a minute…` : "Designing your flyer — about a minute…";
     await say(chatId, greeting ? `${greeting}\n\n${working}` : working);
     void channel.typing?.(chatId).catch(() => undefined);
-    const outcome = await generate({ jobId, userId, prompt, format: formatFrom(prompt), cost: free ? 0 : COST, balance: charge.balance, channel: "whatsapp", ideogram: !free, freeFlyer: free });
+    // One design per request: the Ideogram lead when it runs (paid), else the engine's best.
+    const outcome = await generate({ jobId, userId, prompt, format, cost: free ? 0 : COST, balance: charge.balance, channel: "whatsapp", ideogram: !free, freeFlyer: free, variations: 1 });
     if (!outcome.ok) {
       // The job runner has already given back the credits or the free flyer.
       return say(
@@ -204,33 +239,24 @@ export function createBot({ channel, generate = defaultGenerate, render = defaul
             : outcome.message,
       );
     }
-    const watermark = free || PLANS[profile.plan].watermark;
-    const { docs, directions } = outcome.response;
-    let delivered = 0;
-    for (const [i, doc] of docs.entries()) {
-      const label = directions[i];
-      try {
-        await channel.sendImage(chatId, await render(doc, watermark), `${i + 1} · ${label?.layout ?? "Design"}${label?.palette ? ` · ${label.palette}` : ""}`, `flyer-${i + 1}.png`);
-        delivered += 1;
-      } catch (error) {
-        log.warn("whatsapp.image_failed", { design: i + 1, reason: (error instanceof Error ? error.message : String(error)).split("\n")[0] });
-      }
-    }
-    // The designs exist either way (saved as a project): never leave someone with nothing.
-    if (delivered < docs.length) {
-      await say(
-        chatId,
-        delivered === 0
-          ? `Your designs are ready, but WhatsApp couldn't upload the pictures just now. Open them here:\n${siteUrl()}/editor/${outcome.response.projectId}\n(Sign in with this WhatsApp number.) Reply *1*, *2* or *3* for the others.`
-          : `${docs.length - delivered} of the pictures didn't upload — reply its number to open it in the editor instead.`,
-      );
-    }
     await db()
       .insert(whatsappChats)
       .values({ phone, userId, lastJobId: jobId })
       .onConflictDoUpdate({ target: whatsappChats.phone, set: { userId, lastJobId: jobId, updatedAt: sql`now()` } });
+
     const after = await getProfile(userId);
-    await say(chatId, [`Reply *1*, *2* or *3* to open a design in the editor (HD, PDF, Photoshop).`, allowance(after)].join("\n"));
+    const caption = [
+      "Here's your flyer ✨",
+      "Need any fixes? Reply with what to change — e.g. _make the date bigger_ or _use blue_. Start with *new* for a different flyer.",
+      allowance(after),
+    ].join("\n\n");
+    try {
+      // Only free flyers carry the watermark; anything paid for is clean.
+      await channel.sendImage(chatId, await render(outcome.response.docs[0]!, free), caption, "flyer.png");
+    } catch (error) {
+      log.warn("whatsapp.image_failed", { reason: (error instanceof Error ? error.message : String(error)).split("\n")[0] });
+      await say(chatId, "Your flyer is ready, but WhatsApp couldn't upload it just now. Reply *resend* to try again.");
+    }
   }
 
   async function handle(message: Incoming) {
@@ -261,7 +287,7 @@ export function createBot({ channel, generate = defaultGenerate, render = defaul
         [
           welcome,
           "",
-          "Describe the flyer you need and I'll design three options. For example:",
+          "Describe the flyer you need and I'll design it. For example:",
           "_Braai fundraiser at Hatfield Primary, Saturday 2pm, $5 a plate, call 0771 234 567_",
           "",
           "Add *status* for a WhatsApp Status size, or *square* for Instagram. Reply *help* any time.",
@@ -269,15 +295,42 @@ export function createBot({ channel, generate = defaultGenerate, render = defaul
       );
     }
 
+    // Out of free flyers and never bought: two replies, then quiet — except to buy.
+    const isPurchase = PURCHASE_COMMANDS.includes(command) || Boolean(PASSES[command]);
+    if (!isPurchase) {
+      const profile = await getProfile(account.id);
+      if (profile.plan === "free" && profile.freeFlyers === 0 && profile.credits < COST && !(await hasPaid(account.id))) {
+        const count = await countOutOfCreditReply(message.phone, account.id);
+        if (count > OUT_OF_CREDIT_REPLIES) return;
+        return say(
+          message.chatId,
+          count < OUT_OF_CREDIT_REPLIES
+            ? "You've used your 3 free flyers. To keep making flyers, get a Pro or Max pass — reply *buy* to see them."
+            : "Reply *buy* for a Pro or Max pass to keep making flyers. I'll stay quiet until then.",
+        );
+      }
+    }
+
     if (message.kind !== "text") return say(message.chatId, "I can only read text for now — describe your flyer in a message.");
 
     if (GREETINGS.includes(command)) return help(message.chatId, account.id);
+    if (THANKS.includes(command)) return say(message.chatId, "You're welcome! Send *new* and a description whenever you need another flyer.");
     if (["balance", "credits", "credit"].includes(command)) return balance(message.chatId, account.id);
-    if (["buy", "upgrade", "pass", "passes", "pricing", "price", "prices", "pro", "max"].includes(command)) return passes(message.chatId);
+    if (PURCHASE_COMMANDS.includes(command)) return passes(message.chatId);
     if (PASSES[command]) return buy(message.chatId, account, PASSES[command]!);
-    if (/^[1-3]$/.test(command)) return openDesign(message.chatId, message.phone, account.id, Number(command) - 1);
-    if (sanitizePrompt(text).length < 12) return help(message.chatId, account.id);
-    return flyer(message.chatId, message.phone, account.id, text);
+    if (["resend", "send again", "again"].includes(command)) return resend(message.chatId, message.phone, account.id);
+
+    // "new …" is always a different flyer; anything else right after a flyer is a fix to it.
+    const fresh = /^new\b[\s:,-]*/i.test(text);
+    const request = fresh ? text.replace(/^new\b(\s+flyer\b)?[\s:,-]*/i, "").trim() : text;
+    if (!fresh) {
+      const last = await lastFlyer(message.phone, account.id);
+      if (last?.recent && request.length >= 3) {
+        return flyer(message.chatId, message.phone, account.id, withFix(last.prompt, request), undefined, last.format as FlyerFormat);
+      }
+    }
+    if (sanitizePrompt(request).length < 12) return help(message.chatId, account.id);
+    return flyer(message.chatId, message.phone, account.id, request);
   }
 
   return {

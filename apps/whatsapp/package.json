@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --env-file=../../.env.local src/index.ts",
+    "dev": "tsx --env-file=../../.env.local src/index.ts",
     "start": "node dist/index.mjs",
     "build": "node scripts/build.mjs",
     "test": "tsx scripts/test-bot.mts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:watch": "tsx watch --env-file=../../.env.local src/index.ts"
   },
   "dependencies": {
     "@flyer/ai": "workspace:*",

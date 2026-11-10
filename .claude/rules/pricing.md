@@ -38,5 +38,12 @@
   Free plan spends free flyers first; Pro/Max spend credits first (`chargeForFlyer`). A failed job gives back what it used.
 - The web joins the same account: a WhatsApp-code sign-in finds it by number; an email account that proves the number
   (`/api/whatsapp/link`) absorbs it with `merge_accounts` (projects, credits, free flyers, pass, number).
+- WhatsApp makes **one design per request** (`variations: 1`: the Ideogram lead when it runs, else the engine's best) —
+  pricing matters. After a flyer the bot asks for fixes: a reply within 2 hours re-designs that flyer with the change
+  (and costs one flyer, like any generation); a message starting with "new" is a different flyer; "resend" re-sends the
+  last flyer free. No editor links in the chat.
+- **Watermark only on free flyers.** Anything paid for with credits is clean, whatever the plan.
+- Out of free flyers and never paid (no `pass:` or `grant:` credits): the bot replies **twice**, then stays silent —
+  except to "buy" and the pass commands (`whatsapp_chats.out_of_credit_replies`).
 - "buy" sells the same passes through `startPayment` (Paynow link in the chat); the bot polls and confirms in the chat.
 - Comps / owner passes: `pnpm admin:grant-pass <phone|email> <pro|max> [month|year]` (`grant_pass`, credits keyed once).

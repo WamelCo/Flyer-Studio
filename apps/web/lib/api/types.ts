@@ -22,6 +22,7 @@ export const API_ERROR_CODES = [
   "UPLOAD_FAILED",
   "INTERNAL_ERROR",
   "NETWORK_ERROR",
+  "SERVICE_UNAVAILABLE",
 ] as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];

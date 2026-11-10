@@ -315,6 +315,8 @@ export const whatsappChats = pgTable("whatsapp_chats", {
   phone: text("phone").primaryKey(),
   userId: uuid("user_id").references(() => profiles.id, { onDelete: "cascade" }),
   lastJobId: uuid("last_job_id"),
+  /** "Out of free flyers" replies sent to someone who has never bought: the bot stops after two. */
+  outOfCreditReplies: integer("out_of_credit_replies").notNull().default(0),
   updatedAt: updatedAt(),
 });
 

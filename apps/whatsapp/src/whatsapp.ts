@@ -37,7 +37,14 @@ export function messageId(message: { id?: { _serialized?: string; id?: string; r
   return `${message.from}_${message.timestamp ?? 0}_${createHash("sha256").update(message.body ?? "").digest("hex").slice(0, 16)}`;
 }
 
-export function startWhatsApp(onMessage: (message: Incoming) => void): WhatsApp {
+export interface StartOptions {
+  /** A linking round starts: the first QR code since starting, being linked or logged out. */
+  onQr?: () => void;
+  /** Print each QR in the log as text (the container's logs); development links through /qr instead. */
+  terminalQr?: boolean;
+}
+
+export function startWhatsApp(onMessage: (message: Incoming) => void, options: StartOptions = {}): WhatsApp {
   const state: WhatsApp["state"] = { status: "starting", qr: null, number: null };
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: process.env.WHATSAPP_DATA_DIR || ".wwebjs_auth" }),
@@ -54,10 +61,15 @@ export function startWhatsApp(onMessage: (message: Incoming) => void): WhatsApp 
   });
 
   client.on("qr", async (qr) => {
+    // WhatsApp rotates the code every ~20 s: only the first one starts a linking round.
+    const firstOfRound = state.status !== "qr";
     state.status = "qr";
     state.qr = qr;
+    if (firstOfRound) options.onQr?.();
     // Scan from the logs (docker compose logs -f) or the /qr page.
-    console.log(`\nScan with the studio's WhatsApp (Linked devices → Link a device):\n${await QRCode.toString(qr, { type: "terminal", small: true })}`);
+    if (options.terminalQr ?? true) {
+      console.log(`\nScan with the studio's WhatsApp (Linked devices → Link a device):\n${await QRCode.toString(qr, { type: "terminal", small: true })}`);
+    }
   });
   client.on("ready", () => {
     state.status = "ready";

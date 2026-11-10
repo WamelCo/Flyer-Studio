@@ -4,9 +4,13 @@
  * The SMTP test talks to a tiny in-process SMTP server, so it needs no account or network.
  */
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { createServer, type Socket } from "node:net";
 
+import { closeDb, isDatabaseUnavailable } from "@flyer/db";
+
 import { emailConfigured, sendEmailCode } from "../src/email";
+import { describeError } from "../src/logger";
 import { normalizePhone } from "../src/phone";
 import { formatPhone, studioNumber } from "../src/gateway";
 
@@ -133,6 +137,58 @@ await test("numbers as people type them become E.164 (local 0… read as Zimbabw
   assert.equal(normalizePhone("hello"), null);
   assert.equal(studioNumber({ WHATSAPP_NUMBER: "0717726626" } as NodeJS.ProcessEnv), "+263717726626");
   assert.equal(formatPhone("+263717726626"), "+263 71 772 6626");
+});
+
+console.log("database outages");
+
+const refused = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5432"), { code: "ECONNREFUSED" });
+
+await test("connection failures count as an outage, however they're wrapped; a bad query doesn't", () => {
+  assert.ok(isDatabaseUnavailable(new Error("Failed query: select 1\nparams: ", { cause: refused })));
+  assert.ok(isDatabaseUnavailable(new AggregateError([refused], "")));
+  assert.ok(isDatabaseUnavailable(Object.assign(new Error("the database system is starting up"), { code: "57P03" })));
+  assert.ok(isDatabaseUnavailable(Object.assign(new Error("connection failure"), { code: "08006" })));
+  assert.ok(isDatabaseUnavailable(new Error("timeout exceeded when trying to connect")));
+  assert.ok(!isDatabaseUnavailable(Object.assign(new Error("syntax error at or near"), { code: "42601" })));
+  assert.ok(!isDatabaseUnavailable(new Error("INVALID_OTP")));
+});
+
+await test("logged errors never carry Drizzle's query parameters (session tokens)", () => {
+  const fields = describeError(new Error("Failed query: select * from session where token = $1\nparams: SECRET-TOKEN", { cause: refused }));
+  assert.doesNotMatch(JSON.stringify(fields), /SECRET-TOKEN/);
+  assert.deepEqual([fields.code, fields.cause], ["ECONNREFUSED", "connect ECONNREFUSED 127.0.0.1:5432"]);
+});
+
+await test("a session check with the database down: a recognisable outage, one quiet warning, no token", async () => {
+  // Nothing listens on port 1: every connection is refused, like a stopped Postgres.
+  process.env.DATABASE_URL = "postgres://flyer:flyer@127.0.0.1:1/flyer";
+  const secret = "test-secret-for-the-outage-check-0123456789";
+  process.env.BETTER_AUTH_SECRET = secret;
+  const { createAuth } = await import("../src/index");
+  const auth = createAuth();
+  // A properly signed session cookie, so Better Auth really looks the token up.
+  const token = "OUTAGETOKEN0123456789abcdefghijk";
+  const signature = createHmac("sha256", secret).update(token).digest("base64");
+  const headers = new Headers({ cookie: `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}` });
+  const printed: { level: string; line: string }[] = [];
+  const original = { warn: console.warn, error: console.error };
+  console.warn = (...args: unknown[]) => void printed.push({ level: "warn", line: args.join(" ") });
+  console.error = (...args: unknown[]) => void printed.push({ level: "error", line: args.join(" ") });
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const failure = await auth.api.getSession({ headers }).then(
+        () => assert.fail("the session check should fail while the database is down"),
+        (error: unknown) => error,
+      );
+      assert.ok(isDatabaseUnavailable(failure), "the thrown error says the database is unreachable");
+    }
+  } finally {
+    Object.assign(console, original);
+    await closeDb();
+  }
+  assert.deepEqual(printed.map((entry) => entry.level), ["warn"], "one warning for both attempts, no console.error");
+  assert.match(printed[0]!.line, /"event":"auth\.database_unreachable"/);
+  assert.doesNotMatch(printed[0]!.line, new RegExp(token));
 });
 
 console.log(`\n${passed} passed`);

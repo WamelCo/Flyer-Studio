@@ -109,8 +109,9 @@ Ideogram is the only image model; it is used for artwork, never for final text.
 - Log failures to `ai_generation_logs` table.
 
 ## Output
-- Generate 3 variations by default — three distinct design directions (layout × palette × type);
-  with Ideogram configured: 1 Ideogram lead (first palette/pairing) + 2 engine directions.
+- Generate 3 variations by default on the web — three distinct design directions (layout × palette × type);
+  with Ideogram configured: 1 Ideogram lead (first palette/pairing) + 2 engine directions. WhatsApp asks for one
+  (`GenerationInput.variations = 1`): the Ideogram lead when it runs, else the engine's top-ranked design.
 - Ideogram costs real money per image: keep the lead to one image per generation unless the
   credit prices in `packages/billing/src/plans.ts` are raised to match. A lead is one image ($0.03 low /
   $0.06 medium / $0.10 high, any size) + one Layerize call ($0.09) — check with
